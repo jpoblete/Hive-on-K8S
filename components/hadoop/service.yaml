@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nameservice
+  namespace: default
+  labels:
+    app: hadoop
+spec:
+  type: ClusterIP
+  selector:
+    app: hadoop
+  ports:
+  - port: 8020
+    targetPort: 8020
+    name: rpc
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data
+  namespace: default
+  labels:
+    app: hadoop
+spec:
+  type: ClusterIP
+  selector:
+    app: hadoop
+  ports:
+  - port: 9866
+    targetPort: 9866
+    name: data
+    protocol: TCP

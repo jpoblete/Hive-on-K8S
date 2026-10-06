@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: mysql
+  name: mysql
+  namespace: default
+spec:
+  replicas: 1
+  serviceName: mysql
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      serviceAccountName: mysql
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 999
+      containers:
+      - name: mysql
+        image: mysql:8.4
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: hive-credentials
+              key: mysql-root-password
+        - name: MYSQL_DATABASE
+          value: hive
+        - name: MYSQL_USER
+          value: hive
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: hive-credentials
+              key: hive-metastore-password
+        lifecycle:
+          postStart:
+            exec:
+              command: ["/bin/bash", "/docker-entrypoint-initdb.d/osSetup.sh"]  
+        startupProbe:
+          tcpSocket:
+            port: 3306
+          periodSeconds: 5
+          failureThreshold: 120
+        readinessProbe:
+          tcpSocket:
+            port: 3306
+          periodSeconds: 10
+          failureThreshold: 3
+        volumeMounts:
+        - name: hive-setup
+          mountPath: /docker-entrypoint-initdb.d/
+        - name: mysql
+          mountPath: /var/lib/mysql  
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+      volumes:
+      - name: hive-setup
+        configMap:
+          name: mysql  
+          defaultMode: 0777
+  volumeClaimTemplates:
+  - metadata:
+      name: mysql
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
+#EOF

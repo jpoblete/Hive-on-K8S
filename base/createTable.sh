@@ -15,6 +15,9 @@ PRT_COUNT="${4:-0}"
 ROW_PART="${5:-10}"
 ITERATIONS="${6:-10}"
 HQL_FILE="/tmp/createTable.${TIMESTAMP}.hql"
+BEELINE_URL="${BEELINE_URL:-jdbc:hive2://$(hostname -f):10000/default}"
+BEELINE_USER="${BEELINE_USER:-hive}"
+BEELINE_PASSWORD="${BEELINE_PASSWORD:-}"
 
 # Print command usage and describe each positional argument.
 usage() {
@@ -242,4 +245,4 @@ main() {
 }
 
 main | tee "${HQL_FILE}"
-beeline -u "jdbc:hive2://$(hostname -f):10000/default" -n hive -p hive -f "${HQL_FILE}"
+beeline -u "${BEELINE_URL}" -n "${BEELINE_USER}" -p "${BEELINE_PASSWORD}" -f "${HQL_FILE}"

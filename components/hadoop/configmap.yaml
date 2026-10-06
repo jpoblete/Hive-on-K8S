@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hadoop-setup
+  namespace: default
+  labels:
+    app: hadoop
+data:
+  bashrc: |
+    #
+    # Hadoop environment
+    #
+    export JAVA_HOME=/usr/lib/jvm/jre
+    export HADOOP_HOME=/opt/hadoop
+    #EOF
+
+  core-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>fs.defaultFS</name>
+          <value>hdfs://nameservice:8020</value>
+       </property>
+       <property>
+          <name>hadoop.proxyuser.hive.hosts</name>
+          <value>*</value>
+       </property>
+       <property>
+          <name>hadoop.proxyuser.hive.groups</name>
+          <value>*</value>
+       </property>
+       <property>
+          <name>fs.s3a.endpoint</name>
+          <value></value>
+       </property>
+       <property>
+          <name>fs.s3a.access.key</name>
+          <value></value>
+       </property>
+       <property>
+          <name>fs.s3a.secret.key</name>
+          <value></value>
+       </property>
+    </configuration>
+
+  hdfs-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>dfs.replication</name>
+          <value>1</value>
+       </property>
+       <property>
+          <name>dfs.namenode.rpc-bind-host</name>
+          <value>0.0.0.0</value>
+       </property>
+       <property>
+          <name>hadoop.tmp.dir</name>
+          <value>/hdfs</value>
+       </property>
+    </configuration>
+
+  mapred-site.xml: |
+    <?xml version="1.0"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>mapred.job.tracker</name>
+          <value>nameservice:9001</value>
+       </property>
+    </configuration>
+
+  hadoop-env.sh: |
+    #
+    # HADOOP Environment
+    #
+    export JAVA_HOME=/usr/lib/jvm/jre
+    export HADOOP_HOME=/opt/hadoop
+    export HADOOP_HEAPSIZE=1024m
+    #EOF
+
+  root-tasks.sh: |
+    #!/bin/bash
+    #
+    # ROOT Tasks
+    #
+    function retry(){
+     local attempts="$1"
+     local delay="$2"
+     local attempt=1
+     shift 2
+
+     until "$@"; do
+      if [ "${attempt}" -ge "${attempts}" ]; then
+       echo "Command failed after ${attempts} attempts: $*"
+       return 1
+      fi
+      echo "Attempt ${attempt}/${attempts} failed: $*"
+      sleep "${delay}"
+      attempt=$((attempt + 1))
+     done
+    }
+    #
+    {
+     sed -i.bak 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+     sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+     yum clean all
+     retry 5 10 yum -y install less vi vim lsof openssh-server openssh-clients sshpass hostname bind-utils iputils nmap-ncat || exit 1
+     echo "root:${ROOT_PASSWORD}" | chpasswd
+     echo "hadoop:${HADOOP_PASSWORD}" | chpasswd
+     if getent group supergroup >/dev/null; then
+      echo "supergroup group already exists"
+     else
+      groupadd supergroup
+     fi
+     if getent passwd hive >/dev/null; then
+      echo "hive user already exists"
+     else
+      useradd -G supergroup hive
+     fi
+     echo "hive:${HIVE_PASSWORD}" | chpasswd
+     ssh-keygen -A
+     exec /usr/sbin/sshd -D &
+     host_name="$(hostname)"
+     sed -i --copy "s/${host_name}/${host_name}\tnameservice/g" /etc/hosts
+    }
+    exit $?
+    #EOF
+
+  setup.sh: |
+    #!/bin/bash
+    #
+    # Setup the OS/Hadoop environment
+    #
+    sudo env ROOT_PASSWORD="${ROOT_PASSWORD}" HADOOP_PASSWORD="${HADOOP_PASSWORD}" HIVE_PASSWORD="${HIVE_PASSWORD}" /hadoop/root-tasks.sh
+    ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_rsa
+    sshpass -p "${HADOOP_PASSWORD}" ssh-copy-id -o StrictHostKeyChecking=no localhost
+    export HADOOP_HOME=/opt/hadoop
+    cp --backup=numbered /hadoop/bashrc          ${HADOOP_HOME}/.bashrc
+    cp --backup=numbered /hadoop/core-site.xml   ${HADOOP_HOME}/etc/hadoop/core-site.xml
+    cp --backup=numbered /hadoop/hdfs-site.xml   ${HADOOP_HOME}/etc/hadoop/hdfs-site.xml
+    cp --backup=numbered /hadoop/mapred-site.xml ${HADOOP_HOME}/etc/hadoop/mapred-site.xml
+    cp --backup=numbered /hadoop/hadoop-env.sh   ${HADOOP_HOME}/etc/hadoop/hadoop-env.sh
+    format_check=$(find /hdfs/dfs/name -mindepth 1 -print -quit)
+    if [ -n "${format_check}" ]; then
+      echo "HDFS already formatted"
+    else
+      echo "Formatting HDFS"
+      ${HADOOP_HOME}/bin/hadoop namenode -format
+    fi
+    if ! "${HADOOP_HOME}/sbin/start-all.sh"; then
+         echo "Failed to start Hadoop"
+         exit 1
+    elif [ -n "${format_check}" ]; then
+         echo "Hadoop started successfully, HDFS already formatted"     
+    else
+         echo "Hadoop started successfully, initializing HDFS directories for Hive"
+         hdfs dfs -mkdir -p /tmp/hive /users/hive /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+         hdfs dfs -chmod 777 / /tmp
+         hdfs dfs -chown -R hive:supergroup /tmp/hive /users/hive /warehouse
+    fi
+    sleep infinity
+    #EOF

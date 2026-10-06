@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hive
+  labels:
+    app: hive
+data:
+  core-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+      <property>
+        <name>fs.defaultFS</name>
+        <value>file:///</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hive.hosts</name>
+        <value>*</value>
+      </property>
+      <property>
+        <name>hadoop.proxyuser.hive.groups</name>
+        <value>*</value>
+      </property>
+    </configuration>
+
+  hive-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+      <property>
+        <name>mapred.job.tracker</name>
+        <value>local</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionURL</name>
+        <value>jdbc:derby:/opt/hive/derby/metastore_db;create=true</value>
+      </property>
+      <property>
+        <name>hive.metastore.warehouse.dir</name>
+        <value>file:///opt/hive/data/warehouse</value>
+      </property>
+      <property>
+        <name>hive.metastore.uris</name>
+        <value>thrift://127.0.0.1:9083</value>
+      </property>
+      <property>
+        <name>datanucleus.schema.autoCreateTables</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>hive.jar.directory</name>
+        <value>/opt/hive/lib</value>
+      </property>
+      <property>
+        <name>hive.exec.scratchdir</name>
+        <value>/opt/hive/scratch_dir</value>
+      </property>
+      <property>
+        <name>hive.user.install.directory</name>
+        <value>/opt/hive/install_dir</value>
+      </property>
+      <property>
+        <name>hive.execution.engine</name>
+        <value>tez</value>
+      </property>
+      <property>
+        <name>tez.local.mode</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>tez.runtime.optimize.local.fetch</name>
+        <value>true</value>
+      </property>
+      <property>
+        <name>hive.tez.exec.inplace.progress</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>hive.tez.exec.print.summary</name>
+        <value>true</value>
+      </property>
+    </configuration>
+
+  bash_profile: |
+    if [ -f ~/.bashrc ]; then
+       # shellcheck source=/dev/null
+       . ~/.bashrc
+    fi
+
+  bashrc: |
+    export JAVA_HOME=/opt/java/openjdk
+    export HIVE_HOME=/opt/hive
+    export HIVE_CONF_DIR=/opt/hive/conf
+    export HADOOP_HOME=/opt/hadoop
+    export HADOOP_CONF_DIR=/opt/hive/conf
+    export PATH=${PATH}:/opt/hive/conf:/opt/hive/bin:/opt/hadoop/bin:.
+    export BEELINE_URL="jdbc:hive2://hiveserver2.standalone.svc.cluster.local:10000/default"
+    export BEELINE_USER="${BEELINE_USER:-hive}"
+    if [ -f ~/.beeline.env ]; then
+       # shellcheck source=/dev/null
+       . ~/.beeline.env
+    fi
+    alias beeline='beeline -u "${BEELINE_URL}" -n "${BEELINE_USER:-hive}" -p "${BEELINE_PASSWORD:-}" --verbose=true'
+
+  staging.sh: |
+    #!/bin/bash
+    set -x
+
+    retry(){
+       local attempts="$1"
+       local delay="$2"
+       local attempt=1
+       shift 2
+
+       until "$@"; do
+          if [ "${attempt}" -ge "${attempts}" ]; then
+             echo "Command failed after ${attempts} attempts: $*"
+             return 1
+          fi
+          echo "Attempt ${attempt}/${attempts} failed: $*"
+          sleep "${delay}"
+          attempt=$((attempt + 1))
+       done
+    }
+
+    staging(){
+       retry 5 10 microdnf -y install less vim lsof which net-tools bind-utils hostname nmap-ncat || return 1
+       echo "root:${ROOT_PASSWORD}" | chpasswd
+       echo "hive:${HIVE_PASSWORD}" | chpasswd
+       usermod -s /bin/bash hive
+       mkdir -p "${HIVE_HOME}/log" "${HIVE_HOME}/scratch_dir" "${HIVE_HOME}/install_dir" "${HIVE_HOME}/data/warehouse"
+       cp "${HIVE_HOME}"/setup/*.xml "${HIVE_HOME}/conf/"
+       cp "${HIVE_HOME}/setup/bashrc" /home/hive/.bashrc
+       cp "${HIVE_HOME}/setup/bash_profile" /home/hive/.bash_profile
+       if [ -n "${BEELINE_PASSWORD:-}" ]; then
+          printf 'export BEELINE_PASSWORD=%q\n' "${BEELINE_PASSWORD}" > /home/hive/.beeline.env
+          chmod 600 /home/hive/.beeline.env
+       fi
+       if [ "${SERVICE}" = "hiveserver2" ] && [ -f "${HIVE_HOME}/setup/createTable.sh" ]; then
+          cp "${HIVE_HOME}/setup/createTable.sh" "${HIVE_HOME}/bin/createTable.sh"
+          chmod +x "${HIVE_HOME}/bin/createTable.sh"
+       fi
+       chown -R hive:hive "${HIVE_HOME}" /home/hive 2>/dev/null || true
+    }
+
+    staging || exit 1
+    exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_HOME=${HIVE_HOME}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; /opt/hive/setup/startHive.sh" - hive
+
+  startHive.sh: |
+    #!/bin/bash
+    set -x
+
+    startHive(){
+       [ -z "${TEZ_HOME}" ] && export TEZ_HOME=/opt/tez
+       [ -z "${HIVE_HOME}" ] && export HIVE_HOME=/opt/hive
+       [ -z "${JAVA_HOME}" ] && export JAVA_HOME=/opt/java/openjdk
+       [ -z "${HADOOP_HOME}" ] && export HADOOP_HOME=/opt/hadoop
+       cd "${HIVE_HOME}" || exit 1
+
+       env | awk '/_PORT/ && /=tcp:\/\// {gsub(/tcp:\/\/.*:/,"");print $0}' | while IFS= read -r assignment; do
+          echo "Correcting: ${assignment}"
+          export "${assignment?}"
+       done
+
+       for tez_path in "${TEZ_HOME}"/*.jar; do
+          [ -e "${tez_path}" ] || continue
+          tez_jar="${tez_path##*/}"
+          [ ! -e "${HIVE_HOME}/lib/${tez_jar}" ] && ln -s "${tez_path}" "${HIVE_HOME}/lib/${tez_jar}"
+       done
+
+       if [ "${SERVICE}" = "metastore" ]; then
+          "${HIVE_HOME}/bin/schematool" -dbType derby -initOrUpgradeSchema --verbose
+          log_file="${HIVE_HOME}/log/hivemetastore.${HOSTNAME}.$(date +%s).log"
+       else
+          log_file="${HIVE_HOME}/log/${SERVICE}.${HOSTNAME}.$(date +%s).log"
+       fi
+       [ ! -e "${HIVE_HOME}/conf/log4j.properties" ] && ln -s "${HIVE_HOME}/conf/hive-log4j2.properties" "${HIVE_HOME}/conf/log4j.properties"
+
+       echo "Starting ${SERVICE}"
+       "${HIVE_HOME}/bin/hive" --service "${SERVICE}" > "${log_file}" 2>&1
+       status=$?
+       echo "${status}"
+       sleep 3600
+       return "${status}"
+    }
+
+    id
+    startHive

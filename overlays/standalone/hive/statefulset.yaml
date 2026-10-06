@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hive
+  namespace: standalone
+  labels:
+    app: hive
+spec:
+  serviceName: hive
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hive
+  template:
+    metadata:
+      labels:
+        app: hive
+    spec:
+      serviceAccountName: hive
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+        - name: hivemetastore
+          image: apache/hive:4.2.0
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/hive/setup/staging.sh"]
+          env:
+            - name: HIVE_HOME
+              value: /opt/hive
+            - name: SERVICE
+              value: metastore
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: root-password
+            - name: HIVE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hive-password
+            - name: BEELINE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: beeline-password
+          startupProbe:
+            tcpSocket:
+              port: 9083
+            periodSeconds: 5
+            failureThreshold: 720
+          readinessProbe:
+            tcpSocket:
+              port: 9083
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: configmap
+              mountPath: /opt/hive/setup
+            - name: derby
+              mountPath: /opt/hive/derby
+            - name: warehouse
+              mountPath: /opt/hive/data/warehouse
+            - name: logs
+              mountPath: /opt/hive/log
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 3Gi
+        - name: hiveserver2
+          image: apache/hive:4.2.0
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/hive/setup/staging.sh"]
+          env:
+            - name: HIVE_HOME
+              value: /opt/hive
+            - name: SERVICE
+              value: hiveserver2
+            - name: BEELINE_URL
+              value: jdbc:hive2://hiveserver2.standalone.svc.cluster.local:10000/default
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: root-password
+            - name: HIVE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hive-password
+            - name: BEELINE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: beeline-password
+          startupProbe:
+            tcpSocket:
+              port: 10000
+            periodSeconds: 5
+            failureThreshold: 720
+          readinessProbe:
+            tcpSocket:
+              port: 10000
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: configmap
+              mountPath: /opt/hive/setup
+            - name: warehouse
+              mountPath: /opt/hive/data/warehouse
+            - name: logs
+              mountPath: /opt/hive/log
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 3Gi
+      volumes:
+        - name: configmap
+          configMap:
+            name: hive
+            defaultMode: 0777
+        - name: derby
+          persistentVolumeClaim:
+            claimName: pvc-derby
+        - name: warehouse
+          persistentVolumeClaim:
+            claimName: pvc-warehouse
+        - name: logs
+          persistentVolumeClaim:
+            claimName: pvc-logs

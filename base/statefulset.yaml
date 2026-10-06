@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hivemetastore
+  namespace: default
+  labels:
+    app: hivemetastore
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hivemetastore
+  template:
+    metadata:
+      labels:
+        app: hivemetastore
+        environment: basic
+    spec:
+      serviceAccountName: hive
+      automountServiceAccountToken: false
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      containers:
+      - name: hivemetastore
+        image: apache/hive:4.2.0
+        imagePullPolicy: IfNotPresent
+        command: ["/opt/hive/setup/start-hive.sh"]
+        env:
+          - name: HIVE_HOME
+            value: /opt/hive
+          - name: SERVICE
+            value: "metastore"
+          - name: ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: root-password
+          - name: HIVE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-password
+          - name: HIVE_METASTORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-metastore-password
+          - name: BEELINE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: beeline-password
+        volumeMounts:
+          - name: configmap
+            mountPath: /opt/hive/setup
+        startupProbe:
+          tcpSocket:
+            port: 9083
+          periodSeconds: 5
+          failureThreshold: 720
+        readinessProbe:
+          tcpSocket:
+            port: 9083
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 250m
+            memory: 1Gi
+          limits:
+            cpu: "1"
+            memory: 3Gi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      volumes:
+        - name: configmap
+          configMap:
+            name: hivemetastore
+            defaultMode: 0777
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+#EOF      

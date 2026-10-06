@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql 
+  namespace: default
+  labels:
+    app: mysql
+data:
+  osSetup.sh: |
+    #!/bin/bash
+    function retry(){
+       local attempts="$1"
+       local delay="$2"
+       local attempt=1
+       shift 2
+
+       until "$@"; do
+          if [ "${attempt}" -ge "${attempts}" ]; then
+             echo "Command failed after ${attempts} attempts: $*"
+             return 1
+          fi
+          echo "Attempt ${attempt}/${attempts} failed: $*"
+          sleep "${delay}"
+          attempt=$((attempt + 1))
+       done
+    }
+    #
+    if [ "$(whoami)" == "root" ]; then
+       retry 5 10 microdnf -y install less vi vim lsof openssh-server openssh-clients sshpass hostname bind-utils iputils nmap-ncat
+    fi
+    #EOF

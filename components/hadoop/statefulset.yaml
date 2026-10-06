@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop
+  namespace: default
+  labels:
+    app: hadoop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop
+  template:
+    metadata:
+      labels:
+        app: hadoop
+    spec:
+      serviceAccountName: hadoop
+      automountServiceAccountToken: false
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule    
+      containers:
+      - name: hadoop
+        image: apache/hadoop:3.4.1
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          privileged: true
+        command: [ "/hadoop/setup.sh" ]
+        env:
+          - name: ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: root-password
+          - name: HADOOP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hadoop-password
+          - name: HIVE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-password
+        startupProbe:
+          exec:
+            command:
+              - /bin/bash
+              - -ec
+              - |
+                for port in 8020 9870 9864 9866 9867 9868 8030 8031 8032 8033 8088 8040 8042; do
+                  nc -z -w 2 127.0.0.1 "${port}" || exit 1
+                done
+                /opt/hadoop/bin/hdfs dfs -ls / >/dev/null
+                /opt/hadoop/bin/hdfs dfsadmin -report | awk '/Live datanodes \([1-9][0-9]*\):/ {found=1} END {exit !found}'
+          periodSeconds: 5
+          timeoutSeconds: 20
+          failureThreshold: 120
+        readinessProbe:
+          exec:
+            command:
+              - /bin/bash
+              - -ec
+              - |
+                for port in 8020 9870 9864 9866 9867 9868 8030 8031 8032 8033 8088 8040 8042; do
+                  nc -z -w 2 127.0.0.1 "${port}" || exit 1
+                done
+                /opt/hadoop/bin/hdfs dfs -ls / >/dev/null
+                /opt/hadoop/bin/hdfs dfsadmin -report | awk '/Live datanodes \([1-9][0-9]*\):/ {found=1} END {exit !found}'
+          periodSeconds: 10
+          timeoutSeconds: 20
+          failureThreshold: 3
+        volumeMounts:
+          - name: mapconfig-volume
+            mountPath: /hadoop
+          - name: pvc-hdfs
+            mountPath: /hdfs
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: "2"
+            memory: 6Gi
+      volumes:
+        - name: mapconfig-volume
+          configMap:
+            name: hadoop-setup
+            defaultMode: 0755
+        - name: pvc-hdfs
+          persistentVolumeClaim:
+            claimName: pvc-hdfs
+            
+#EOF
