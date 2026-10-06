@@ -35,6 +35,8 @@ minikube
 
 The manifests define resource requests and limits for local Kubernetes labs. A machine with 36 GB RAM is enough to run both `mini` and `standalone` comfortably.
 
+For the `mini` profile, a cluster with **3 worker nodes** is suggested so Hadoop, MySQL, Metastore, and HiveServer2 have room to schedule cleanly across the local cluster.
+
 Minimum practical host sizes:
 
 ```text
