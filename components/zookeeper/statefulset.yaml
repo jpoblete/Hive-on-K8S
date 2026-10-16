@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: zookeeper
+  name: zookeeper
+  namespace: default
+spec:
+  replicas: 1
+  serviceName: zookeeper
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      serviceAccountName: zookeeper
+      automountServiceAccountToken: false
+      containers:
+      - name: zookeeper
+        image: zookeeper:3.8
+        env:
+        - name: ZOO_ADMINSERVER_ENABLED
+          value: "false"
+        - name: ZOO_4LW_COMMANDS_WHITELIST
+          value: "ruok,srvr,mntr"
+        - name: ZK_SERVER_HEAP
+          value: "256"
+        startupProbe:
+          tcpSocket:
+            port: 2181
+          periodSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          tcpSocket:
+            port: 2181
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+#EOF

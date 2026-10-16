@@ -1,0 +1,256 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - ../../../base/
+#
+# General rename of metadata
+#
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/name
+        value: llapdaemon
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /metadata/labels
+        value:
+          app: llapdaemon
+    target:
+      name: hivemetastore
+#
+# StatefulSet
+#
+  - patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels
+        value:
+          app: llapdaemon
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/selector/matchLabels
+        value:
+          app: llapdaemon
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  # Daemons register their pod FQDN in ZooKeeper; HiveServer2 and the other daemons connect to it
+  - patch: |-
+      - op: add
+        path: /spec/serviceName
+        value: llapdaemon
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/podManagementPolicy
+        value: Parallel
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: SERVICE
+            value: "llapdaemon"
+          - name: LLAP_DAEMON_HEAPSIZE
+            value: "3072"
+          - name: ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: root-password
+          - name: HIVE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-password
+          - name: HIVE_LOG_HDFS_BASE
+            value: "hdfs://nameservice:8020/logs/llap"
+          - name: HIVE_LOG_HDFS_SYNC_INTERVAL_SEC
+            value: "300"
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 90
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/lifecycle
+        value:
+          preStop:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  if [ -n "${HIVE_LOG_HDFS_BASE:-}" ] && [ -f /opt/hive/bin/hdfs-log-sync.sh ]; then
+                    su -s /bin/bash hive -c '/opt/hive/bin/hdfs-log-sync.sh push' || true
+                  fi
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/startupProbe/tcpSocket/port
+        value: 15001
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe/tcpSocket/port
+        value: 15001
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  # Heap (LLAP_DAEMON_HEAPSIZE) + off-heap IO cache (hive.llap.io.memory.size) + JVM overhead
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 500m
+            memory: 4Gi
+          limits:
+            cpu: "2"
+            memory: 5Gi
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: llap-work
+          mountPath: /opt/hive/llap/work
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: llap-work
+          emptyDir: {}
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: llapdaemon
+              topologyKey: kubernetes.io/hostname
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                - key: node-role.kubernetes.io/llap
+                  operator: Exists
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: apache/hive:nightly
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+#
+# Service
+#
+  - patch: |-
+      - op: add
+        path: /spec/clusterIP
+        value: None
+      - op: add
+        path: /spec/publishNotReadyAddresses
+        value: true
+      - op: replace
+        path: /spec/sessionAffinity
+        value: None
+      - op: remove
+        path: /spec/sessionAffinityConfig
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/ports
+        value:
+          - port: 15001
+            targetPort: 15001
+            name: rpc
+          - port: 15002
+            targetPort: 15002
+            name: web
+          - port: 15003
+            targetPort: 15003
+            name: output
+          - port: 15004
+            targetPort: 15004
+            name: management
+          - port: 15551
+            targetPort: 15551
+            name: shuffle
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/selector
+        value:
+          app: llapdaemon
+    target:
+      kind: Service
+      name: hivemetastore
+
+configMapGenerator:
+  - name: hivemetastore
+    behavior: merge
+    files:
+      - hive-site.xml=hive-site.xml
+#EOF

@@ -32,20 +32,50 @@ function help(){
    echo "        hiveCtl cleanup <overlay>"
    echo "        hiveCtl status"
 }
-# Return success when the Kubernetes namespace exists.
+# Print the names of the objects kubectl get selects, nothing when there are none.
+# A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.
+function kubectlNames(){
+   local attempt=1
+   local errors=""
+
+   until errors="$(kubectl get "$@" -o name --ignore-not-found 2>&1 >&3)"; do
+      if [ "${attempt}" -ge 3 ]; then
+         echo "${errors}" >&2
+         return 2
+      fi
+      attempt=$((attempt + 1))
+      sleep 2
+   done 3>&1
+}
+# Return 0 when the Kubernetes namespace exists, 1 when it doesn't, 2 when Kubernetes can't be queried.
 function namespaceExists(){
    local namespace="$1"
+   local names=""
 
-   kubectl get namespace "${namespace}" >/dev/null 2>&1
+   names="$(kubectlNames namespace "${namespace}")" || return 2
+   [ -n "${names}" ]
 }
 # Require a namespace before running namespace-scoped operations.
 function requireNamespace(){
    local namespace="$1"
 
-   if ! namespaceExists "${namespace}"; then
-      echo "Namespace '${namespace}' does not exist"
-      return 1
-   fi
+   namespaceExists "${namespace}"
+   case $? in
+      0) return 0 ;;
+      1) echo "Namespace '${namespace}' does not exist" ;;
+   esac
+   return 1
+}
+# Create the namespace when it doesn't exist yet.
+function ensureNamespace(){
+   local namespace="$1"
+
+   namespaceExists "${namespace}"
+   case $? in
+      0) return 0 ;;
+      1) kubectl create namespace "${namespace}" --save-config >/dev/null ;;
+      *) return 1 ;;
+   esac
 }
 # Generate a local password for Kubernetes Secrets.
 function generatePassword(){
@@ -64,12 +94,11 @@ function ensureSecrets(){
    local mysql_root_password=""
    local hive_metastore_password=""
    local beeline_password=""
+   local names=""
 
-   if ! namespaceExists "${namespace}"; then
-      kubectl create namespace "${namespace}" >/dev/null
-   fi
-
-   if kubectl get secret hive-credentials -n "${namespace}" >/dev/null 2>&1; then
+   ensureNamespace "${namespace}" || return 1
+   names="$(kubectlNames secret hive-credentials -n "${namespace}")" || return 1
+   if [ -n "${names}" ]; then
       return 0
    fi
 
@@ -82,13 +111,16 @@ function ensureSecrets(){
 
    # Existing mini PVCs were initialized with the historical lab passwords.
    # Preserve compatibility so adding Secrets does not break a running metastore.
-   if [ "${namespace}" = "mini" ] && kubectl get pvc mysql-mysql-0 -n "${namespace}" >/dev/null 2>&1; then
-      root_password="cloudera"
-      hive_password="hive"
-      hadoop_password="hadoop"
-      mysql_root_password="mysql"
-      hive_metastore_password="hive"
-      beeline_password="hive"
+   if [ "${namespace}" = "mini" ]; then
+      names="$(kubectlNames pvc mysql-mysql-0 -n "${namespace}")" || return 1
+      if [ -n "${names}" ]; then
+         root_password="cloudera"
+         hive_password="hive"
+         hadoop_password="hadoop"
+         mysql_root_password="mysql"
+         hive_metastore_password="hive"
+         beeline_password="hive"
+      fi
    fi
 
    kubectl create secret generic hive-credentials -n "${namespace}" \
@@ -114,17 +146,33 @@ for key in ("creationTimestamp", "resourceVersion", "uid", "managedFields"):
 print(json.dumps(obj, indent=2))
 ' > "${backup_dir}/hive-credentials.secret.json"
 }
-# Restore namespace credentials from a backup when present.
+# Restore namespace credentials from a backup when present. MySQL creates its users on first boot and
+# the metastore dump doesn't include them, so once MySQL has a volume the current credentials are kept.
 function restoreSecrets(){
    local namespace="$1"
    local backup_dir="$2"
    local secret_file="${backup_dir}/hive-credentials.secret.json"
+   local names=""
 
-   if [ -f "${secret_file}" ]; then
-      kubectl apply -f "${secret_file}" >/dev/null
-   else
+   if [ ! -f "${secret_file}" ]; then
       ensureSecrets "${namespace}"
+      return $?
    fi
+   ensureNamespace "${namespace}" || return 1
+   names="$(kubectlNames pvc mysql-mysql-0 -n "${namespace}")" || return 1
+   if [ -n "${names}" ]; then
+      ensureSecrets "${namespace}" || return 1
+      if ! kubectl get secret hive-credentials -n "${namespace}" -o json \
+         | python3 -c 'import json, sys; sys.exit(json.load(sys.stdin)["data"] != json.load(open(sys.argv[1]))["data"])' "${secret_file}"; then
+         echo "Keeping the current credentials of '${namespace}': its MySQL users were created with them, and the dump doesn't include users"
+      fi
+      return 0
+   fi
+   python3 -c 'import json, sys
+obj = json.load(open(sys.argv[1]))
+obj["metadata"].pop("namespace", None)
+print(json.dumps(obj))
+' "${secret_file}" | kubectl apply -n "${namespace}" -f - >/dev/null
 }
 # List overlay/component pairs discovered from Kustomize files.
 function overlays(){
@@ -140,22 +188,25 @@ function activeOverlays(){
    #
    local arg="${1:-}"
    local target=""
-   local namespace=""
-   local service=""
    local active_list=""
+   local status=0
 
    for target in $(overlays); do
-       namespace="${target%_*}"
-       service="${target#*_}"
-       if kubectl get statefulsets -n "${namespace}" --selector="app=${service}" --no-headers 2>/dev/null | awk 'NF {found=1} END {exit !found}'; then
-          active_list="${active_list}${target}"$'\n'
-       fi
+       overlayActive "${target}"
+       case $? in
+          0) active_list="${active_list}${target}"$'\n' ;;
+          2)
+             status=1
+             break
+             ;;
+       esac
    done
 
    if [ -n "${arg}" ]; then
       echo "Active Overlays:"
    fi
    printf "%s" "${active_list}"
+   return "${status}"
 }
 # Return success when the requested overlay exists in the project.
 function overlayExists(){
@@ -166,33 +217,46 @@ function overlayExists(){
 
    overlays | awk -v target="${target}" '$0 == target {found=1} END {exit !found}'
 }
-# Return success when the requested overlay is active in Kubernetes.
+# Return 0 when the requested overlay has a StatefulSet, 1 when it doesn't, 2 when Kubernetes can't be queried.
 function overlayActive(){
-   #
-   # Checks whether the requested overlay is currently active exactly.
-   #
    local target="$1"
+   local names=""
 
-   activeOverlays | awk -v target="${target}" '$0 == target {found=1} END {exit !found}'
+   names="$(kubectlNames statefulsets -n "${target%_*}" --selector="app=${target#*_}")" || return 2
+   [ -n "${names}" ]
 }
-# Wait until a component pod reports Ready.
+# Wait until every replica of a component StatefulSet reports Ready.
 function waitForReady(){
    local namespace="$1"
    local service="$2"
 
-   kubectl wait --for=condition=Ready "pod/${service}-0" -n "${namespace}" --timeout=600s
+   kubectl rollout status "statefulset/${service}" -n "${namespace}" --timeout=600s
 }
-# Wait until a component StatefulSet and pod are deleted.
+# Wait until none of the objects selected by the kubectl get arguments exist.
+function waitForDeleted(){
+   local timeout="$1"
+   local deadline=$((SECONDS + timeout))
+   local remaining=""
+   shift
+
+   while remaining="$(kubectlNames "$@")"; do
+      if [ -z "${remaining}" ]; then
+         return 0
+      fi
+      if [ "${SECONDS}" -ge "${deadline}" ]; then
+         echo "Timed out after ${timeout}s waiting for the deletion of: $(echo "${remaining}" | paste -sd' ' -)"
+         return 1
+      fi
+      sleep 2
+   done
+   return 1
+}
+# Wait until a component StatefulSet and all of its pods are deleted.
 function waitForStopped(){
    local namespace="$1"
    local service="$2"
 
-   if kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
-      kubectl wait --for=delete "statefulset/${service}" -n "${namespace}" --timeout=180s
-   fi
-   if kubectl get pod "${service}-0" -n "${namespace}" >/dev/null 2>&1; then
-      kubectl wait --for=delete "pod/${service}-0" -n "${namespace}" --timeout=180s
-   fi
+   waitForDeleted 180 statefulsets,pods -n "${namespace}" --selector="app=${service}"
 }
 # Start one overlay/component and wait for its pod readiness.
 function startOverlay(){
@@ -205,20 +269,27 @@ function startOverlay(){
    local namespace="${target%_*}"
    local service="${target#*_}"
 
-   if overlayActive "${target}"; then
-      echo "Overlay: ${target} is already ACTIVE, try stopping/restarting it"
-      waitForReady "${namespace}" "${service}"
-   else
-      if overlayExists "${target}"; then
-         echo "Starting Overlay: ${target} ..."
-         ensureSecrets "${namespace}" || return 1
-         #kubectl apply -k "${overlay_path}"
-         kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
+   overlayActive "${target}"
+   case $? in
+      0)
+         echo "Overlay: ${target} is already ACTIVE, try stopping/restarting it"
          waitForReady "${namespace}" "${service}"
-      else
-         echo "Overlay: ${target} DOES NOT EXIST"
-      fi
-   fi
+         ;;
+      1)
+         if overlayExists "${target}"; then
+            echo "Starting Overlay: ${target} ..."
+            ensureSecrets "${namespace}" || return 1
+            #kubectl apply -k "${overlay_path}"
+            kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
+            waitForReady "${namespace}" "${service}"
+         else
+            echo "Overlay: ${target} DOES NOT EXIST"
+         fi
+         ;;
+      *)
+         return 1
+         ;;
+   esac
 }
 # Stop one overlay/component while preserving PVCs.
 function stopOverlay(){
@@ -227,33 +298,30 @@ function stopOverlay(){
    # Ex: mini_hivemetastore, mini_hiveserver2, etc
    #
    local target="$1"
-   local namespace=""
-   local service=""
-   local type=""
-   local name=""
-   local resource_namespace=""
+   local namespace="${target%_*}"
+   local service="${target#*_}"
+   local resources=""
+   local resource=""
 
-   if overlayActive "${target}"; then
-      echo "Stopping Overlay: ${target} ..."
-      namespace=${target%_*}
-      service=${target#*_}
-      if [ "${service}" == "hadoop" ]; then
-         kubectl get sts,pods,cm,svc -n "${namespace}" --selector="app=${service}" --no-headers -o custom-columns=TYPE:.kind,NAME:.metadata.name,NAMESPACE:.metadata.namespace \
-         | tr '[:upper:]' '[:lower:]'                     \
-         | while read -r type name resource_namespace; do
-            kubectl delete "${type}" "${name}" -n "${resource_namespace}" --force
-         done
-      else
-        kubectl get sts,pods,cm,svc -n "${namespace}" --selector="app=${service}" --no-headers -o custom-columns=TYPE:.kind,NAME:.metadata.name,NAMESPACE:.metadata.namespace \
-        | tr '[:upper:]' '[:lower:]'                     \
-        | while read -r type name resource_namespace; do
-            kubectl delete "${type}" "${name}" -n "${resource_namespace}" --force
-        done
-      fi
-      waitForStopped "${namespace}" "${service}"
-   else
-      echo "Overlay: ${target} is already STOPPED or DOES NOT EXIST"
-   fi
+   overlayActive "${target}"
+   case $? in
+      0) ;;
+      1)
+         echo "Overlay: ${target} is already STOPPED or DOES NOT EXIST"
+         return 0
+         ;;
+      *)
+         return 1
+         ;;
+   esac
+
+   echo "Stopping Overlay: ${target} ..."
+   resources="$(kubectlNames sts,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
+   # Not forced: each pod gets its termination grace period to shut its services down cleanly
+   for resource in ${resources}; do
+      kubectl delete "${resource}" -n "${namespace}" --wait=false || return 1
+   done
+   waitForStopped "${namespace}" "${service}"
 }
 # Start all components in dependency order.
 function startStack(){
@@ -264,6 +332,9 @@ function startStack(){
    case "${namespace}" in
       standalone)
          components=(hive)
+         ;;
+      llap)
+         components=(hadoop mysql zookeeper hivemetastore llapdaemon hiveserver2)
          ;;
       *)
          components=(hadoop mysql hivemetastore hiveserver2)
@@ -286,6 +357,9 @@ function stopStack(){
       standalone)
          components=(hive)
          ;;
+      llap)
+         components=(hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
+         ;;
       *)
          components=(hiveserver2 hivemetastore mysql hadoop)
          ;;
@@ -301,11 +375,15 @@ function ensureOverlayReady(){
    local service="$2"
    local target="${namespace}_${service}"
 
-   if ! overlayActive "${target}"; then
-      echo "Overlay: ${target} must be active"
-      return 1
-   fi
-   waitForReady "${namespace}" "${service}"
+   overlayActive "${target}"
+   case $? in
+      0) waitForReady "${namespace}" "${service}" ;;
+      1)
+         echo "Overlay: ${target} must be active"
+         return 1
+         ;;
+      *) return 1 ;;
+   esac
 }
 # Stop Hive writer services and report which ones were stopped.
 function stopHiveWriters(){
@@ -315,14 +393,22 @@ function stopHiveWriters(){
    local hms_was_stopped=0
    local hs2_was_stopped=0
 
-   if overlayActive "${namespace}_hiveserver2"; then
-      stopOverlay "${namespace}_hiveserver2" || return 1
-      hs2_was_stopped=1
-   fi
-   if overlayActive "${namespace}_hivemetastore"; then
-      stopOverlay "${namespace}_hivemetastore" || return 1
-      hms_was_stopped=1
-   fi
+   overlayActive "${namespace}_hiveserver2"
+   case $? in
+      0)
+         stopOverlay "${namespace}_hiveserver2" || return 1
+         hs2_was_stopped=1
+         ;;
+      2) return 1 ;;
+   esac
+   overlayActive "${namespace}_hivemetastore"
+   case $? in
+      0)
+         stopOverlay "${namespace}_hivemetastore" || return 1
+         hms_was_stopped=1
+         ;;
+      2) return 1 ;;
+   esac
 
    printf -v "${stopped_hms_var}" "%s" "${hms_was_stopped}"
    printf -v "${stopped_hs2_var}" "%s" "${hs2_was_stopped}"
@@ -403,10 +489,14 @@ function backupStandaloneStack(){
    echo "Creating standalone backup in: ${backup_dir}"
    backupSecrets "${namespace}" "${backup_dir}" || return 1
 
-   if overlayActive "${namespace}_hive"; then
-      stopOverlay "${namespace}_hive" || return 1
-      was_active=1
-   fi
+   overlayActive "${namespace}_hive"
+   case $? in
+      0)
+         stopOverlay "${namespace}_hive" || return 1
+         was_active=1
+         ;;
+      2) return 1 ;;
+   esac
 
    createStandaloneDataHelper "${namespace}" || status=1
    if [ "${status}" -eq 0 ]; then
@@ -436,6 +526,7 @@ function restoreStandaloneStack(){
    local namespace="$1"
    local backup_dir="$2"
    local was_active=0
+   local names=""
    local status=0
 
    if [ -z "${backup_dir}" ]; then
@@ -447,14 +538,22 @@ function restoreStandaloneStack(){
       return 1
    fi
 
-   requireNamespace "${namespace}" || return 1
    restoreSecrets "${namespace}" "${backup_dir}" || return 1
    echo "Restoring standalone backup from: ${backup_dir}"
 
-   if overlayActive "${namespace}_hive"; then
-      stopOverlay "${namespace}_hive" || return 1
-      was_active=1
+   # The data helper mounts the overlay's PVCs, which only exist once the overlay has been started
+   names="$(kubectlNames pvc pvc-derby -n "${namespace}")" || return 1
+   if [ -z "${names}" ]; then
+      startOverlay "${namespace}_hive" || return 1
    fi
+   overlayActive "${namespace}_hive"
+   case $? in
+      0)
+         stopOverlay "${namespace}_hive" || return 1
+         was_active=1
+         ;;
+      2) return 1 ;;
+   esac
 
    createStandaloneDataHelper "${namespace}" || status=1
    if [ "${status}" -eq 0 ]; then
@@ -529,7 +628,7 @@ EOF
    pv_names="$(
       kubectl get pv --no-headers -o custom-columns=NAME:.metadata.name,CLAIM:.spec.claimRef.name,NAMESPACE:.spec.claimRef.namespace \
       | awk -v namespace="${namespace}" '($2 == "pvc-derby" || $2 == "pvc-warehouse" || $2 == "pvc-logs") && $3 == namespace {print $1}'
-   )"
+   )" || return 1
 
    stopStack "${namespace}" || return 1
 
@@ -543,17 +642,11 @@ EOF
       done
    fi
 
-   for pvc in pvc-derby pvc-warehouse pvc-logs; do
-      if kubectl get pvc "${pvc}" -n "${namespace}" >/dev/null 2>&1; then
-         kubectl wait --for=delete "pvc/${pvc}" -n "${namespace}" --timeout=180s || status=1
-      fi
-   done
+   waitForDeleted 180 pvc/pvc-derby pvc/pvc-warehouse pvc/pvc-logs -n "${namespace}" || status=1
 
    echo "Deleting namespace '${namespace}' ..."
    kubectl delete namespace "${namespace}" --ignore-not-found || status=1
-   if kubectl get namespace "${namespace}" >/dev/null 2>&1; then
-      kubectl wait --for=delete "namespace/${namespace}" --timeout=300s || status=1
-   fi
+   waitForDeleted 300 "namespace/${namespace}" || status=1
 
    if [ "${status}" -eq 0 ]; then
       echo "Standalone cleanup complete. Run './hiveCtl.sh start ${namespace}' to recreate the namespace and empty PVCs."
@@ -632,6 +725,8 @@ function restoreStack(){
    local backup_dir="$2"
    local stopped_hms=0
    local stopped_hs2=0
+   local started_storage=0
+   local component=""
    local status=0
 
    if [ "${namespace}" = "standalone" ]; then
@@ -648,14 +743,24 @@ function restoreStack(){
       return 1
    fi
 
-   requireNamespace "${namespace}" || return 1
    restoreSecrets "${namespace}" "${backup_dir}" || return 1
 
    echo "Restoring backup from: ${backup_dir}"
    stopHiveWriters "${namespace}" stopped_hms stopped_hs2 || return 1
 
-   ensureOverlayReady "${namespace}" hadoop || status=1
-   ensureOverlayReady "${namespace}" mysql || status=1
+   # Storage that isn't running is started now and the rest of the stack after the restore,
+   # so on a fresh namespace the Metastore never creates an empty schema first
+   for component in hadoop mysql; do
+      overlayActive "${namespace}_${component}"
+      case $? in
+         0) waitForReady "${namespace}" "${component}" || status=1 ;;
+         1)
+            startOverlay "${namespace}_${component}" || status=1
+            started_storage=1
+            ;;
+         *) status=1 ;;
+      esac
+   done
 
    if [ "${status}" -eq 0 ]; then
       echo "Restoring MySQL metastore database ..."
@@ -689,7 +794,11 @@ function restoreStack(){
       ' || status=1
    fi
 
-   restartHiveWriters "${namespace}" "${stopped_hms}" "${stopped_hs2}" || status=1
+   if [ "${started_storage}" = "0" ]; then
+      restartHiveWriters "${namespace}" "${stopped_hms}" "${stopped_hs2}" || status=1
+   elif [ "${status}" -eq 0 ]; then
+      startStack "${namespace}" || status=1
+   fi
 
    if [ "${status}" -eq 0 ]; then
       echo "Restore complete: ${backup_dir}"
@@ -748,7 +857,7 @@ EOF
    pv_names="$(
       kubectl get pv --no-headers -o custom-columns=NAME:.metadata.name,CLAIM:.spec.claimRef.name,NAMESPACE:.spec.claimRef.namespace \
       | awk -v namespace="${namespace}" '($2 == "mysql-mysql-0" || $2 == "pvc-hdfs") && $3 == namespace {print $1}'
-   )"
+   )" || return 1
 
    stopStack "${namespace}" || return 1
 
@@ -762,18 +871,11 @@ EOF
       done
    fi
 
-   if kubectl get pvc mysql-mysql-0 -n "${namespace}" >/dev/null 2>&1; then
-      kubectl wait --for=delete pvc/mysql-mysql-0 -n "${namespace}" --timeout=180s || status=1
-   fi
-   if kubectl get pvc pvc-hdfs -n "${namespace}" >/dev/null 2>&1; then
-      kubectl wait --for=delete pvc/pvc-hdfs -n "${namespace}" --timeout=180s || status=1
-   fi
+   waitForDeleted 180 pvc/mysql-mysql-0 pvc/pvc-hdfs -n "${namespace}" || status=1
 
    echo "Deleting namespace '${namespace}' ..."
    kubectl delete namespace "${namespace}" --ignore-not-found || status=1
-   if kubectl get namespace "${namespace}" >/dev/null 2>&1; then
-      kubectl wait --for=delete "namespace/${namespace}" --timeout=300s || status=1
-   fi
+   waitForDeleted 300 "namespace/${namespace}" || status=1
 
    if [ "${status}" -eq 0 ]; then
       echo "Cleanup complete. Run './hiveCtl.sh start ${namespace}' to recreate the namespace and empty PVCs."
@@ -811,11 +913,9 @@ main(){
         restart)
           [[ -z "${2:-}" ]] && help && exit 1
           if [ -z "${3:-}" ]; then
-             stopStack "$2"
-             startStack "$2"
+             stopStack "$2" && startStack "$2"
           else
-             stopOverlay  "$2_$3"
-             startOverlay "$2_$3"
+             stopOverlay "$2_$3" && startOverlay "$2_$3"
           fi
           ;;
         backup)

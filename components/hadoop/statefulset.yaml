@@ -50,7 +50,7 @@ spec:
               - /bin/bash
               - -ec
               - |
-                for port in 8020 9870 9864 9866 9867 9868 8030 8031 8032 8033 8088 8040 8042; do
+                for port in 8020 9870 9864 9866 9867 9868; do
                   nc -z -w 2 127.0.0.1 "${port}" || exit 1
                 done
                 /opt/hadoop/bin/hdfs dfs -ls / >/dev/null
@@ -61,16 +61,23 @@ spec:
         readinessProbe:
           exec:
             command:
+              - /hadoop/hdfs-ready.sh
+          periodSeconds: 10
+          timeoutSeconds: 20
+          failureThreshold: 3
+        # -ls only reaches the NameNode, so the DataNode's port is checked too.
+        # The JVM flags halve the CPU of this short-lived client.
+        livenessProbe:
+          exec:
+            command:
               - /bin/bash
               - -ec
               - |
-                for port in 8020 9870 9864 9866 9867 9868 8030 8031 8032 8033 8088 8040 8042; do
-                  nc -z -w 2 127.0.0.1 "${port}" || exit 1
-                done
-                /opt/hadoop/bin/hdfs dfs -ls / >/dev/null
-                /opt/hadoop/bin/hdfs dfsadmin -report | awk '/Live datanodes \([1-9][0-9]*\):/ {found=1} END {exit !found}'
-          periodSeconds: 10
-          timeoutSeconds: 20
+                export HADOOP_CLIENT_OPTS="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC"
+                /opt/hadoop/bin/hdfs dfs -ls -R / >/dev/null
+                nc -z -w 2 127.0.0.1 9866
+          periodSeconds: 30
+          timeoutSeconds: 30
           failureThreshold: 3
         volumeMounts:
           - name: mapconfig-volume

@@ -171,6 +171,23 @@ data:
          -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HIVE_LOG_DIR \
          -Xlog:gc*=info:file=$HIVE_LOG_DIR/gc-${SERVICE}-%p-%t.log:time,uptime,level,tags:filecount=5,filesize=16M"
     fi
+    #
+    # runLlapDaemon.sh reads its settings only from the environment and, unlike bin/hive,
+    # adds neither the Hadoop classpath nor the JDK 17+ --add-opens flags.
+    if [ "$SERVICE" = "llapdaemon" ]; then
+       export LLAP_DAEMON_HOME=/opt/hive
+       export LLAP_DAEMON_CONF_DIR=$HIVE_CONF_DIR
+       export LLAP_DAEMON_LOG_DIR=$HIVE_LOG_DIR
+       export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-3072}
+       export LLAP_LOG4J2_PROPERTIES_FILE_NAME=llap-daemon-log4j2.properties
+       LLAP_DAEMON_USER_CLASSPATH="$($HADOOP_HOME/bin/hadoop classpath)"
+       export LLAP_DAEMON_USER_CLASSPATH
+       export LLAP_DAEMON_OPTS="$LLAP_DAEMON_OPTS --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED \
+         --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED \
+         --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED \
+         --add-opens java.base/java.util.regex=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED \
+         --add-opens java.base/java.io=ALL-UNNAMED -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HIVE_LOG_DIR"
+    fi
     #EOF
 
   bash_profile: |
@@ -252,12 +269,20 @@ data:
           printf 'export BEELINE_PASSWORD=%q\n' "${BEELINE_PASSWORD}" > /home/hive/.beeline.env
           chmod 600 /home/hive/.beeline.env
        fi
+       # Overrides the bashrc default, this pod's own HiveServer2
+       if [ -n "${BEELINE_URL:-}" ]; then
+          printf 'export BEELINE_URL=%q\n' "${BEELINE_URL}" >> /home/hive/.beeline.env
+       fi
        if [ -n "${HIVE_METASTORE_PASSWORD:-}" ]; then
           sed -i "s/__HIVE_METASTORE_PASSWORD__/${HIVE_METASTORE_PASSWORD}/g" "${HIVE_HOME}/conf/hive-site.xml"
        fi
        if [ "${SERVICE}" = "hiveserver2" ] && [ -f "${HIVE_HOME}/setup/createTable.sh" ]; then
           cp "${HIVE_HOME}/setup/createTable.sh" "${HIVE_HOME}/bin/createTable.sh"
           chmod +x "${HIVE_HOME}/bin/createTable.sh"
+       fi
+       if [ -f "${HIVE_HOME}/setup/hdfs-log-sync.sh" ]; then
+          cp "${HIVE_HOME}/setup/hdfs-log-sync.sh" "${HIVE_HOME}/bin/hdfs-log-sync.sh"
+          chmod +x "${HIVE_HOME}/bin/hdfs-log-sync.sh"
        fi
        chown -R hive:hive /home/hive "${HIVE_HOME}" 2>/dev/null || true
        return 0
@@ -311,16 +336,42 @@ data:
           echo "Initializing ${SERVICE^} schema as user: $(whoami)"
           "${HIVE_HOME}/bin/schematool" -dbType mysql -initOrUpgradeSchema
        fi
+       if [ "${SERVICE}" == "llapdaemon" ]; then
+          [ ! -e "${HIVE_HOME}/conf/llap-daemon-log4j2.properties" ] && cp "${HIVE_HOME}/conf/llap-daemon-log4j2.properties.template" "${HIVE_HOME}/conf/llap-daemon-log4j2.properties"
+          # shellcheck source=/dev/null
+          . "${HIVE_HOME}/conf/hive-env.sh"
+       fi
+       #
+       # Optional HDFS log archive (llap HiveServer2 / LLAP when HIVE_LOG_HDFS_BASE is set)
+       #
+       hdfs_log_sync="${HIVE_HOME}/bin/hdfs-log-sync.sh"
+       if [ -n "${HIVE_LOG_HDFS_BASE:-}" ] && [ -f "${hdfs_log_sync}" ]; then
+          "${hdfs_log_sync}" restore || true
+          "${hdfs_log_sync}" start-periodic &
+          hdfs_log_sync_periodic_pid=$!
+          trap '"${hdfs_log_sync}" push' TERM INT
+       fi
        #
        # Start Hive Service
        #
        id
        env
        echo "Starting ${SERVICE^} as user: $(whoami)"
-       "${HIVE_HOME}/bin/hive" --service "${SERVICE}" >& "${HIVE_HOME}/log/${SERVICE/metastore/hivemetastore}-${HOSTNAME}-$(date +%s).log"
+       if [ "${SERVICE}" == "llapdaemon" ]; then
+          "${HIVE_HOME}/scripts/llap/bin/runLlapDaemon.sh" run >& "${HIVE_HOME}/log/${SERVICE}-${HOSTNAME}-$(date +%s).log" &
+       else
+          "${HIVE_HOME}/bin/hive" --service "${SERVICE}" >& "${HIVE_HOME}/log/${SERVICE/metastore/hivemetastore}-${HOSTNAME}-$(date +%s).log" &
+       fi
+       service_pid=$!
+       wait "${service_pid}"
        status=$?
+       if [ -n "${HIVE_LOG_HDFS_BASE:-}" ] && [ -f "${hdfs_log_sync}" ]; then
+          "${hdfs_log_sync}" push || true
+          if [ -n "${hdfs_log_sync_periodic_pid:-}" ]; then
+             kill "${hdfs_log_sync_periodic_pid}" 2>/dev/null || true
+          fi
+       fi
        echo "${status}"
-       sleep 3600
        return "${status}"
     }
     #
@@ -328,7 +379,7 @@ data:
     #
     if [ "$(whoami)" == "root" ]; then
        /opt/hive/setup/staging.sh || exit 1
-       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; /opt/hive/setup/start-hive.sh" - hive
+       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; /opt/hive/setup/start-hive.sh" - hive
     else
        startHive
     fi

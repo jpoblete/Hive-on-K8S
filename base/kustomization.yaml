@@ -9,6 +9,7 @@ configMapGenerator:
     behavior: merge
     files:
       - createTable.sh=createTable.sh
+      - hdfs-log-sync.sh=hdfs-log-sync.sh
 generatorOptions:
   disableNameSuffixHash: true
 #EOF  

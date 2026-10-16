@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - pvc.yaml
+  - namespace.yaml
+  - serviceaccount.yaml
+  - ../../../components/hadoop
+patches:  
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: hadoop
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: hadoop-setup
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: nameservice
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: data
+#EOF

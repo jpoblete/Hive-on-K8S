@@ -1,0 +1,219 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - service.yaml
+  - ../../../base/
+#
+# General rename of metadata
+#
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/name
+        value: hiveserver2
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /metadata/labels
+        value:
+          app: hiveserver2
+    target:
+      name: hivemetastore
+#
+# StatefulSet
+#
+  - patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels
+        value:
+          app: hiveserver2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/selector/matchLabels
+        value:
+          app: hiveserver2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  # LLAP daemons call back the Tez AM at this pod's FQDN
+  - patch: |-
+      - op: add
+        path: /spec/serviceName
+        value: hiveserver2-headless
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  # HiveServer2 registers its hostname in ZooKeeper, which must resolve from other pods
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/setHostnameAsFQDN
+        value: true
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/podManagementPolicy
+        value: Parallel
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: SERVICE
+            value: "hiveserver2"
+          - name: BEELINE_URL
+            value: "jdbc:hive2://zookeeper.llap.svc.cluster.local:2181/default;serviceDiscoveryMode=zooKeeper;zooKeeperNamespace=hiveserver2"
+          - name: ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: root-password
+          - name: HIVE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-password
+          - name: HIVE_METASTORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-metastore-password
+          - name: BEELINE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: beeline-password
+          - name: HIVE_LOG_HDFS_BASE
+            value: "hdfs://nameservice:8020/logs/llap"
+          - name: HIVE_LOG_HDFS_SYNC_INTERVAL_SEC
+            value: "300"
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 90
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/lifecycle
+        value:
+          preStop:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  if [ -n "${HIVE_LOG_HDFS_BASE:-}" ] && [ -f /opt/hive/bin/hdfs-log-sync.sh ]; then
+                    su -s /bin/bash hive -c '/opt/hive/bin/hdfs-log-sync.sh push' || true
+                  fi
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/startupProbe/tcpSocket/port
+        value: 10000
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe/tcpSocket/port
+        value: 10000
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+#
+# Service
+#
+  - patch: |-
+      - op: replace
+        path: /spec/ports/0
+        value:
+          port: 10000
+          targetPort: 10000
+          name: binary
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/ports/1
+        value:
+          port: 10001
+          targetPort: 10001
+          name: http
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/ports/2
+        value:
+          port: 10002
+          targetPort: 10002
+          name: webui
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/selector
+        value:
+          app: hiveserver2
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: apache/hive:nightly
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+configMapGenerator:
+  - name: hivemetastore
+    behavior: merge
+    files:
+      - hive-site.xml=hive-site.xml
+#EOF

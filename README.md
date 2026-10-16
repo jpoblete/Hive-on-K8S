@@ -1,4 +1,4 @@
-# Hive 4.2.0 Kubernetes Lab
+# Apache Hive Kubernetes Lab
 
 ## Author
 
@@ -9,9 +9,19 @@ j.martinez.poblete@gmail.com
 
 This project is not meant for commercial use without permission and proper credit.
 
-This project runs Apache Hive 4.2.0 on Kubernetes using upstream/minimal container images from Docker Hub.
+This project runs Apache Hive on Kubernetes using upstream/minimal container images from Docker Hub (`apache/hive`). Image tags differ by profile; see **Images by profile** below.
 
 The manifests intentionally complete the images at pod startup by installing small OS packages and writing runtime configuration from ConfigMaps. Because those images are minimal, the startup scripts use `root` for bootstrap work and then run Hive/Hadoop services as their application users.
+
+## Images by profile
+
+```text
+mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
+standalone:   apache/hive:4.2.0   (embedded Metastore + HiveServer2 in one pod)
+llap:         apache/hive:nightly (Hive Metastore x2, HiveServer2 x2, LLAP daemon x2)
+```
+
+`mini` and `standalone` pin the released **4.2.0** image. **`llap` uses the moving `nightly` tag** (Beeline reports **4.3.0-SNAPSHOT** today) so Tez and LLAP pick up fixes not in 4.2.0—notably [HIVE-29566](https://issues.apache.org/jira/browse/HIVE-29566), where reopening a Tez session in the same HiveServer2 JVM could fail with `JvmMetrics already exists` on grouped/aggregating queries. After an image bump, metastore pods run `schematool` on startup if the schema version changed. Leave headroom on kind or Docker Desktop nodes when pulling `nightly` (~1.5 GiB per node that schedules a Hive pod). To pin `llap` to a release tag again, change the image patch in `overlays/llap/hivemetastore/kustomization.yaml`, `overlays/llap/hiveserver2/kustomization.yaml`, and `overlays/llap/llapdaemon/kustomization.yaml`.
 
 ## Prerequisites
 
@@ -57,7 +67,18 @@ mini + standalone:
   Kubernetes RAM:  20-24 GB+
   CPUs:            6+
   disk:            30 GB+
+
+llap only:
+  host RAM:        32 GB+
+  Kubernetes RAM:  20-24 GB+
+  CPUs:            6+
+  disk:            30 GB+
+  worker nodes:    2+ (one LLAP daemon per node)
 ```
+
+Run `llap` on its own: its two LLAP daemons alone use about 9 GB, so stop `mini` and `standalone` first (`stop` keeps their PVCs).
+
+With kind on Docker Desktop, every node is a container in the same VM and reports the whole VM memory as allocatable. Adding nodes gives the scheduler more places to put pods, not more memory; raise the Docker Desktop memory instead.
 
 Recommended local runtime settings:
 
@@ -79,6 +100,8 @@ The configured memory limits are intentionally higher than JVM heap settings to 
 Hive containers: 3 Gi limit for 2 Gi heap
 Hadoop pod:      6 Gi limit for multiple 1 Gi Hadoop JVMs
 MySQL pod:       2 Gi limit
+LLAP daemons:    5 Gi limit for 3 Gi heap + 1 Gi off-heap cache
+ZooKeeper pod:   512 Mi limit for 256 Mi heap
 ```
 
 ## Profiles
@@ -242,6 +265,88 @@ Cleanup standalone data and namespace:
 ./hiveCtl.sh cleanup standalone
 ```
 
+### `llap`
+
+`llap` is `mini` plus ZooKeeper and two Hive LLAP daemons. Hive pods use **`apache/hive:nightly`** (see **Images by profile**); that build includes the HIVE-29566 Tez-session fix, which matters here because HiveServer2 keeps a Tez session pool warm for LLAP while clients run many queries in the same JVM.
+
+```text
+hadoop -> mysql -> zookeeper -> hivemetastore -> llapdaemon (x2) -> hiveserver2
+```
+
+The LLAP daemons register in ZooKeeper as the `@llap0` cluster. The Tez application master runs inside HiveServer2 (Tez local mode, because the Hadoop pod doesn't start YARN) and sends query fragments to the daemons, which run them on their executors and cache column data off-heap (LLAP IO). HiveServer2 opens a single Tez session at startup and queries take turns on it: inside HiveServer2's JVM, only the first Tez application master can start the LLAP scheduler. Hive Metastore, HiveServer2, and the daemons share `overlays/llap/hivemetastore/hive-site.xml`.
+
+HiveServer2 registers in ZooKeeper too, and Beeline looks it up there: in `llap`, `BEELINE_URL` points at the `zookeeper` Service, which gives ZooKeeper a stable address (a single ZooKeeper server needs no headless Service). From any Hive pod in the namespace:
+
+```bash
+beeline -u "jdbc:hive2://zookeeper.llap.svc.cluster.local:2181/default;serviceDiscoveryMode=zooKeeper;zooKeeperNamespace=hiveserver2" -n hive
+```
+
+See what is registered:
+
+```bash
+kubectl exec zookeeper-0 -n llap -- zkCli.sh ls /hiveserver2
+kubectl exec zookeeper-0 -n llap -- zkCli.sh ls /llap-unsecure/user-hive/llap0/workers
+```
+
+HiveServer2 and LLAP daemons archive **`/opt/hive/log`** (and Tez local session history on HiveServer2) to HDFS under `hdfs://nameservice:8020/logs/llap/<service>/<pod-hostname>/` every five minutes and on pod shutdown (`base/hdfs-log-sync.sh`, shared by both). Pull the latest tarball with:
+
+```bash
+kubectl exec hadoop-0 -n llap -- hdfs dfs -cat hdfs://nameservice:8020/logs/llap/hiveserver2/hiveserver2-0.hiveserver2-headless.llap.svc.cluster.local/LATEST
+```
+
+HiveServer2 runs **two** replicas. Each pod registers in ZooKeeper under `/hiveserver2` with its headless-Service FQDN (`setHostnameAsFQDN` + `hiveserver2-headless`). Beeline and JDBC clients use the ZooKeeper URL in `BEELINE_URL`, so they discover whichever instances are registered without pinning to the `hiveserver2` ClusterIP Service.
+
+Hive Metastore runs **two** replicas behind the `hivemetastore` Service. Clients keep the single URI `thrift://hivemetastore.llap.svc.cluster.local:9083`; the Service uses **ClientIP** session affinity (one hour), so a given client IP is steered to the same pod rather than round-robin. If that pod goes away, **new** connections from the same client are sent to a healthy backend; long-lived Thrift sessions must reconnect (HiveServer2 opens fresh Beeline sessions each time).
+
+The daemons need two schedulable worker nodes (at most one daemon per node) and prefer nodes labeled `node-role.kubernetes.io/llap`:
+
+```bash
+kubectl label node desktop-worker4 desktop-worker5 node-role.kubernetes.io/llap=
+```
+
+Start:
+
+```bash
+./hiveCtl.sh start llap
+```
+
+Stop:
+
+```bash
+./hiveCtl.sh stop llap
+```
+
+LLAP status:
+
+```bash
+./hiveCtl.sh status
+kubectl get pods,pvc,svc -n llap -o wide
+```
+
+Check that queries run on LLAP:
+
+```bash
+kubectl exec pod/hiveserver2-0 -n llap -it -- /bin/bash
+su -s /bin/bash - hive
+createTable.sh man managed_3_1 3 1 10 1
+beeline -e "EXPLAIN SELECT count(*) FROM managed_3_1;"
+beeline -e "SELECT count(*) FROM managed_3_1;"
+```
+
+Open an LLAP daemon web UI at <http://localhost:15002>:
+
+```bash
+kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
+```
+
+Back up, restore, and cleanup work the same as `mini`:
+
+```bash
+./hiveCtl.sh backup llap
+./hiveCtl.sh restore llap ./backups/llap-YYYYMMDD-HHMMSS
+./hiveCtl.sh cleanup llap
+```
+
 ## Data Safety
 
 PVCs hold the persistent data. Deleting PVCs can cause data loss.
@@ -254,11 +359,14 @@ hive-credentials.secret.json
 
 Treat backup directories as sensitive because they contain both data and credentials.
 
+`stop` keeps the PVCs and gives each pod its grace period to shut its services down cleanly. When the Kubernetes API can't be reached, `hiveCtl.sh` reports the error and stops rather than treating components as stopped or missing.
+
 Use backup before cleanup:
 
 ```bash
 ./hiveCtl.sh backup mini
 ./hiveCtl.sh backup standalone
+./hiveCtl.sh backup llap
 ```
 
 Restore:
@@ -266,29 +374,42 @@ Restore:
 ```bash
 ./hiveCtl.sh restore mini <backup-dir>
 ./hiveCtl.sh restore standalone <backup-dir>
+./hiveCtl.sh restore llap <backup-dir>
 ```
+
+Restore also works after cleanup or on a new cluster: it creates the namespace with the backed-up credentials, starts the storage, loads the backup, and then starts the rest of the stack. If MySQL already has a volume, the current credentials are kept, because MySQL created its users with them and the metastore dump doesn't include users.
 
 Destructive cleanup requires confirmation and offers to create a backup first:
 
 ```bash
 ./hiveCtl.sh cleanup mini
 ./hiveCtl.sh cleanup standalone
+./hiveCtl.sh cleanup llap
 ```
 
 ## Bootstrap Model
 
 The startup scripts use `root` to:
 
-- install missing packages with retry logic
+- install missing packages with retry logic (Hadoop installs its tools in the background and keeps the RPMs on its volume under `/hdfs/rpm-cache`, so only the first start of a new volume needs the CentOS mirrors)
 - copy mounted ConfigMap files into Hive/Hadoop config directories
 - prepare users, permissions, SSH, and symlinks
 
 The long-running services then run as:
 
 - `hadoop` for Hadoop
-- `hive` for Hive Metastore and HiveServer2
+- `hive` for Hive Metastore, HiveServer2, and the LLAP daemons
+- `zookeeper` for ZooKeeper (`llap` only; the image drops privileges itself)
 
 This keeps the upstream images unchanged while still making the lab reproducible.
+
+The Hadoop container restarts itself when HDFS stops answering: its liveness probe runs `hdfs dfs -ls -R /` and checks the DataNode port every 30 seconds, and three failures in a row restart it. The daemon logs live on the Hadoop volume under `/hdfs/logs`, so they survive the restart for a post mortem:
+
+```bash
+kubectl exec hadoop-0 -n mini -- ls -l /hdfs/logs
+```
+
+Deleting the Hadoop pod stops the HDFS daemons cleanly, in reverse start order, instead of waiting out the grace period. YARN stays configured but isn't started, since HiveServer2 runs Tez itself; to bring it back, add the ResourceManager and NodeManager to the daemon list in `components/hadoop/configmap.yaml`.
 
 ## Smoke Tests
 
@@ -314,12 +435,35 @@ su - hive
 beeline -e "show databases;"
 ```
 
+LLAP HDFS:
+
+```bash
+kubectl exec hadoop-0 -n llap -- hdfs dfs -ls /
+```
+
+LLAP ZooKeeper (HiveServer2 and LLAP worker registration):
+
+```bash
+kubectl exec zookeeper-0 -n llap -- zkCli.sh ls /hiveserver2
+kubectl exec zookeeper-0 -n llap -- zkCli.sh ls /llap-unsecure/user-hive/llap0/workers
+```
+
+LLAP Beeline (ZooKeeper service discovery; `BEELINE_URL` is set inside Hive pods):
+
+```bash
+kubectl exec hiveserver2-0 -n llap -it -- /bin/bash
+su - hive
+beeline -e "show databases;"
+beeline -e "select count(*) from managed_3_1;"
+```
+
 ## Validation
 
 Render all overlays:
 
 ```bash
-for d in overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 overlays/standalone/hive; do
+for d in overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 overlays/standalone/hive \
+         overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2; do
   kustomize build "$d" --load-restrictor LoadRestrictionsNone | kubectl apply --dry-run=client -f -
 done
 ```

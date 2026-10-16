@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiveserver2-headless
+  namespace: llap
+  labels:
+    app: hiveserver2
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: hiveserver2
+  ports:
+  - port: 10000
+    targetPort: 10000
+    name: binary
+    protocol: TCP
+#EOF

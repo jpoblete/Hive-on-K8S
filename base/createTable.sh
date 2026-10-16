@@ -231,11 +231,10 @@ genData() {
 }
 
 # Main execution flow.
-# Validates arguments, creates the table statement, then generates insert batches.
+# Creates the table statement, then generates insert batches.
 main() {
    local i
 
-   validate_args
    createDatabase
    createTbl
 
@@ -244,5 +243,8 @@ main() {
    done
 }
 
-main | tee "${HQL_FILE}"
-beeline -u "${BEELINE_URL}" -n "${BEELINE_USER}" -p "${BEELINE_PASSWORD}" -f "${HQL_FILE}"
+# Validated outside the pipeline: there, die would only exit the pipeline's subshell
+validate_args
+main | tee "${HQL_FILE}" || exit 1
+# Not -f: Beeline 4.2.0 reads that file through JLine and can drop its last statement; !run reads the whole file first
+beeline -u "${BEELINE_URL}" -n "${BEELINE_USER}" -p "${BEELINE_PASSWORD}" -e "!run ${HQL_FILE}"

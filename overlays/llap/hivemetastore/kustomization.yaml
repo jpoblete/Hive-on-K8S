@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:  
+  - serviceaccount.yaml
+  - ../../../base
+#
+# Namespace adjustments
+#
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: llap
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/podManagementPolicy
+        value: Parallel
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  # HIVE-29566 (JvmMetrics on Tez session reopen) is fixed in 4.3+, not in 4.2.0
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: apache/hive:nightly
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+configMapGenerator:
+  - name: hivemetastore
+    behavior: merge
+    files:
+      - hive-site.xml=hive-site.xml
