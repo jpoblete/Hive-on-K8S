@@ -16,8 +16,8 @@ The manifests intentionally complete the images at pod startup by installing sma
 ## Images by profile
 
 ```text
-mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
 standalone:   apache/hive:4.2.0   (embedded Metastore + HiveServer2 in one pod)
+mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
 llap:         apache/hive:nightly (Hive Metastore x2, HiveServer2 x2, LLAP daemon x2)
 ```
 
@@ -62,7 +62,7 @@ mini only:
   CPUs:            4+
   disk:            20 GB+
 
-mini + standalone:
+standalone + mini:
   host RAM:        32 GB+
   Kubernetes RAM:  20-24 GB+
   CPUs:            6+
@@ -76,7 +76,7 @@ llap only:
   worker nodes:    2+ (one LLAP daemon per node)
 ```
 
-Run `llap` on its own: its two LLAP daemons alone use about 9 GB, so stop `mini` and `standalone` first (`stop` keeps their PVCs).
+Run `llap` on its own: its two LLAP daemons alone use about 9 GB, so stop `standalone` and `mini` first (`stop` keeps their PVCs).
 
 With kind on Docker Desktop, every node is a container in the same VM and reports the whole VM memory as allocatable. Adding nodes gives the scheduler more places to put pods, not more memory; raise the Docker Desktop memory instead.
 
@@ -105,6 +105,80 @@ ZooKeeper pod:   512 Mi limit for 256 Mi heap
 ```
 
 ## Profiles
+
+### `standalone`
+
+`standalone` runs Hive without HDFS or MySQL. It uses Derby and local PVC-backed warehouse storage.
+
+Start:
+
+```bash
+./hiveCtl.sh start standalone
+```
+
+Stop:
+
+```bash
+./hiveCtl.sh stop standalone
+```
+
+Standalone status:
+
+```bash
+./hiveCtl.sh status
+kubectl get pods,pvc,svc -n standalone
+```
+
+Open a shell in the HiveServer2 container:
+
+```bash
+kubectl exec pod/hive-0 -c hiveserver2 -n standalone -it -- /bin/bash
+```
+
+Switch to the `hive` user:
+
+```bash
+su -s /bin/bash - hive
+```
+
+Run Beeline using the built-in alias:
+
+```bash
+beeline
+```
+
+Run a Beeline command directly:
+
+```bash
+beeline -e "SHOW DATABASES;"
+```
+
+Create a sample table with generated data:
+
+```bash
+createTable.sh man managed_3_1 3 1 10 1
+beeline -e "SHOW TABLES;"
+```
+
+Back up standalone data:
+
+```bash
+./hiveCtl.sh backup standalone
+```
+
+Restore standalone data:
+
+```bash
+./hiveCtl.sh restore standalone ./backups/standalone-YYYYMMDD-HHMMSS
+```
+
+Replace `standalone-YYYYMMDD-HHMMSS` with the actual backup directory name.
+
+Cleanup standalone data and namespace:
+
+```bash
+./hiveCtl.sh cleanup standalone
+```
 
 ### `mini`
 
@@ -189,80 +263,6 @@ Cleanup mini data and namespace:
 
 ```bash
 ./hiveCtl.sh cleanup mini
-```
-
-### `standalone`
-
-`standalone` runs Hive without HDFS or MySQL. It uses Derby and local PVC-backed warehouse storage.
-
-Start:
-
-```bash
-./hiveCtl.sh start standalone
-```
-
-Stop:
-
-```bash
-./hiveCtl.sh stop standalone
-```
-
-Standalone status:
-
-```bash
-./hiveCtl.sh status
-kubectl get pods,pvc,svc -n standalone
-```
-
-Open a shell in the HiveServer2 container:
-
-```bash
-kubectl exec pod/hive-0 -c hiveserver2 -n standalone -it -- /bin/bash
-```
-
-Switch to the `hive` user:
-
-```bash
-su -s /bin/bash - hive
-```
-
-Run Beeline using the built-in alias:
-
-```bash
-beeline
-```
-
-Run a Beeline command directly:
-
-```bash
-beeline -e "SHOW DATABASES;"
-```
-
-Create a sample table with generated data:
-
-```bash
-createTable.sh man managed_3_1 3 1 10 1
-beeline -e "SHOW TABLES;"
-```
-
-Back up standalone data:
-
-```bash
-./hiveCtl.sh backup standalone
-```
-
-Restore standalone data:
-
-```bash
-./hiveCtl.sh restore standalone ./backups/standalone-YYYYMMDD-HHMMSS
-```
-
-Replace `standalone-YYYYMMDD-HHMMSS` with the actual backup directory name.
-
-Cleanup standalone data and namespace:
-
-```bash
-./hiveCtl.sh cleanup standalone
 ```
 
 ### `llap`
@@ -364,16 +364,16 @@ Treat backup directories as sensitive because they contain both data and credent
 Use backup before cleanup:
 
 ```bash
-./hiveCtl.sh backup mini
 ./hiveCtl.sh backup standalone
+./hiveCtl.sh backup mini
 ./hiveCtl.sh backup llap
 ```
 
 Restore:
 
 ```bash
-./hiveCtl.sh restore mini <backup-dir>
 ./hiveCtl.sh restore standalone <backup-dir>
+./hiveCtl.sh restore mini <backup-dir>
 ./hiveCtl.sh restore llap <backup-dir>
 ```
 
@@ -382,8 +382,8 @@ Restore also works after cleanup or on a new cluster: it creates the namespace w
 Destructive cleanup requires confirmation and offers to create a backup first:
 
 ```bash
-./hiveCtl.sh cleanup mini
 ./hiveCtl.sh cleanup standalone
+./hiveCtl.sh cleanup mini
 ./hiveCtl.sh cleanup llap
 ```
 
@@ -413,6 +413,14 @@ Deleting the Hadoop pod stops the HDFS daemons cleanly, in reverse start order, 
 
 ## Smoke Tests
 
+Standalone Beeline:
+
+```bash
+kubectl exec hive-0 -c hiveserver2 -n standalone -it -- /bin/bash
+su - hive
+beeline -e "show databases;"
+```
+
 Mini HDFS:
 
 ```bash
@@ -423,14 +431,6 @@ Mini Beeline:
 
 ```bash
 kubectl exec hiveserver2-0 -n mini -it -- /bin/bash
-su - hive
-beeline -e "show databases;"
-```
-
-Standalone Beeline:
-
-```bash
-kubectl exec hive-0 -c hiveserver2 -n standalone -it -- /bin/bash
 su - hive
 beeline -e "show databases;"
 ```
@@ -462,7 +462,8 @@ beeline -e "select count(*) from managed_3_1;"
 Render all overlays:
 
 ```bash
-for d in overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 overlays/standalone/hive \
+for d in overlays/standalone/hive \
+         overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 \
          overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2; do
   kustomize build "$d" --load-restrictor LoadRestrictionsNone | kubectl apply --dry-run=client -f -
 done
