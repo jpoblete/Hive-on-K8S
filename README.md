@@ -80,6 +80,25 @@ Run `llap` on its own: its two LLAP daemons alone use about 9 GB, so stop `stand
 
 With kind on Docker Desktop, every node is a container in the same VM and reports the whole VM memory as allocatable. Adding nodes gives the scheduler more places to put pods, not more memory; raise the Docker Desktop memory instead.
 
+## KIND cluster for `llap`
+
+The **`llap` profile does not label nodes for you**—not in `hiveCtl.sh`, not in the Kubernetes manifests. LLAP daemons use **required pod anti-affinity** (at most one `llapdaemon` pod per node) and **prefer** workers that already carry the label `node-role.kubernetes.io/llap`. You must label two workers yourself, or create the cluster from the template below so the last two workers get that label at join time.
+
+**Recommended:** create a six-node kind cluster from [`kind/llap-cluster.yaml`](kind/llap-cluster.yaml) (1 control-plane + 5 workers). With cluster name `desktop`, kind names the workers `desktop-worker` … `desktop-worker5`; the template labels **`desktop-worker4`** and **`desktop-worker5`** automatically:
+
+```bash
+kind create cluster --name desktop --config kind/llap-cluster.yaml
+kubectl get nodes -L node-role.kubernetes.io/llap
+```
+
+If you use an existing cluster (or a different kind cluster name), label two worker nodes **before** `./hiveCtl.sh start llap` (adjust names from `kubectl get nodes`):
+
+```bash
+kubectl label node desktop-worker4 desktop-worker5 node-role.kubernetes.io/llap=
+```
+
+Without two schedulable, distinct nodes, the second `llapdaemon` replica stays pending. Unlabeled nodes can still run daemons, but the scheduler may spread LLAP onto the same hosts as other heavy pods unless you label dedicated workers.
+
 Recommended local runtime settings:
 
 ```text
@@ -267,6 +286,8 @@ Cleanup mini data and namespace:
 
 ### `llap`
 
+> **Before you start:** label **two** worker nodes with `node-role.kubernetes.io/llap` (see **[KIND cluster for `llap`](#kind-cluster-for-llap)**). This repo does not apply that label for you; the kind template in `kind/llap-cluster.yaml` is the supported way to get `desktop-worker4` and `desktop-worker5` labeled on a fresh cluster.
+
 `llap` is `mini` plus ZooKeeper and two Hive LLAP daemons. Hive pods use **`apache/hive:nightly`** (see **Images by profile**); that build includes the HIVE-29566 Tez-session fix, which matters here because HiveServer2 keeps a Tez session pool warm for LLAP while clients run many queries in the same JVM.
 
 ```text
@@ -298,11 +319,7 @@ HiveServer2 runs **two** replicas. Each pod registers in ZooKeeper under `/hives
 
 Hive Metastore runs **two** replicas behind the `hivemetastore` Service. Clients keep the single URI `thrift://hivemetastore.llap.svc.cluster.local:9083`; the Service uses **ClientIP** session affinity (one hour), so a given client IP is steered to the same pod rather than round-robin. If that pod goes away, **new** connections from the same client are sent to a healthy backend; long-lived Thrift sessions must reconnect (HiveServer2 opens fresh Beeline sessions each time).
 
-The daemons need two schedulable worker nodes (at most one daemon per node) and prefer nodes labeled `node-role.kubernetes.io/llap`:
-
-```bash
-kubectl label node desktop-worker4 desktop-worker5 node-role.kubernetes.io/llap=
-```
+Scheduling rules for the two LLAP daemons live in `overlays/llap/llapdaemon/kustomization.yaml` (one daemon per host; prefer `node-role.kubernetes.io/llap`). Node labels are **manual or via the kind template**—see **[KIND cluster for `llap`](#kind-cluster-for-llap)**.
 
 Start:
 
