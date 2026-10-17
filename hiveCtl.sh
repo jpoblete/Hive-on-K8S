@@ -33,6 +33,11 @@ function help(){
    echo "        hiveCtl restore <overlay> <backup-dir>"
    echo "        hiveCtl cleanup <overlay>"
    echo "        hiveCtl status"
+   echo ""
+   echo "Hue (llap): hiveCtl start/stop deploys the pod only."
+   echo "  Browser: kind/llap-cluster.yaml → http://localhost:8888"
+   echo "  Else:    kubectl port-forward svc/hue -n llap 8888:8888"
+   echo "  (See README: Hue browser access)"
 }
 # Print the names of the objects kubectl get selects, nothing when there are none.
 # A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.

@@ -109,6 +109,8 @@ kubectl label node desktop-worker4 desktop-worker5 node-role.kubernetes.io/llap=
 
 Without two schedulable, distinct nodes, the second `llapdaemon` replica stays pending. Unlabeled nodes can still run daemons, but the scheduler may spread LLAP onto the same hosts as other heavy pods unless you label dedicated workers.
 
+This template also maps **Hue** to the host: after `./hiveCtl.sh start llap`, open **http://localhost:8888** (see **[Hue browser access](#hue-browser-access)**). That mapping is **not** done by `hiveCtl.sh`; it is in `extraPortMappings` on the control-plane node below.
+
 Recommended local runtime settings:
 
 ```text
@@ -371,30 +373,59 @@ Open an LLAP daemon web UI at <http://localhost:15002>:
 kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
 ```
 
-**Hue** (`gethue/hue`) starts after HiveServer2. It uses the shared MySQL server for its own `hue` database (credentials in `hive-credentials`: `hue-mysql-password`, `hue-secret-key`). Hive queries go to **`hiveserver2.llap.svc.cluster.local:10000`** with user **`hive`** and the same password as Beeline (`beeline-password` in the Secret). Existing `llap` namespaces get Hue keys patched on the next `./hiveCtl.sh start llap` or `start llap hue`.
+**Hue** (`gethue/hue`) is the optional SQL UI for `llap`. It starts **after** HiveServer2 in the stack order. It uses the shared MySQL server (database **`hue`**, credentials in `hive-credentials`: `hue-mysql-password`, `hue-secret-key`). Hive queries use **`hiveserver2.llap.svc.cluster.local:10000`**, user **`hive`**, password **`beeline-password`** in the same Secret. Clusters created before Hue was added get Hue keys patched on the next `./hiveCtl.sh start llap` or `start llap hue`.
 
-Open Hue in a browser:
-
-```bash
-# kind with kind/llap-cluster.yaml (maps host :8888 → NodePort 30888):
-open http://localhost:8888
-
-# Any cluster — port-forward:
-kubectl port-forward svc/hue -n llap 8888:8888
-# then http://localhost:8888
-
-# Docker Desktop Kubernetes — NodePort without port-forward:
-open http://localhost:30888
-```
-
-Complete the Hue first-login wizard in the browser (create the Hue admin user). The Hive interpreter appears as **Hive** in the query editor.
-
-Start or stop Hue alone:
+#### Deploy Hue
 
 ```bash
-./hiveCtl.sh start llap hue
+./hiveCtl.sh start llap          # includes hue
+# or
+./hiveCtl.sh start llap hue      # hue only (HiveServer2 must already be running)
 ./hiveCtl.sh stop llap hue
 ```
+
+`hiveCtl.sh` **only** creates/updates Kubernetes objects and waits for the pod to become Ready. It does **not** open a browser, run `kubectl port-forward`, or bind a port on your laptop.
+
+#### Hue browser access
+
+Pick **one** way to reach the UI after Hue is Ready (`kubectl get pod -n llap -l app=hue`).
+
+**A — kind with [`kind/llap-cluster.yaml`](kind/llap-cluster.yaml)** (recommended local setup)
+
+1. Create the cluster with that config (not a plain `kind create cluster` without port mappings).
+2. `./hiveCtl.sh start llap`
+3. Open **http://localhost:8888** on the machine where kind runs.
+
+The manifest Service exposes NodePort **30888**; the kind config maps **host 8888 → control-plane 30888**. No port-forward needed.
+
+**B — port-forward** (any Kubernetes cluster; most reliable if A does not apply)
+
+```bash
+kubectl port-forward svc/hue -n llap 8888:8888
+```
+
+Leave that terminal open, then open **http://localhost:8888**.
+
+**C — NodePort only** (no kind port mapping, no port-forward)
+
+The Service `hue` uses **`nodePort: 30888`** (see `overlays/llap/hue/service.yaml`). Open `http://<node-ip>:30888` from a client that can reach the node (on Docker Desktop Kubernetes, **http://localhost:30888** sometimes works).
+
+Check the published port:
+
+```bash
+kubectl get svc hue -n llap
+# PORT(S) should include 8888:30888/TCP unless you changed the manifest
+```
+
+#### First login
+
+Complete Hue’s setup wizard in the browser (create the Hue admin user). Use the **Hive** interpreter in the query editor for SQL against this cluster.
+
+| Who exposes the port | File / action |
+|----------------------|----------------|
+| NodePort **30888** inside the cluster | `overlays/llap/hue/service.yaml` |
+| **localhost:8888** on kind | `kind/llap-cluster.yaml` `extraPortMappings` |
+| **localhost:8888** elsewhere | You run **`kubectl port-forward`** (option B) |
 
 Back up, restore, and cleanup work the same as `mini`:
 
@@ -514,12 +545,13 @@ beeline -e "show databases;"
 beeline -e "select count(*) from managed_3_1;"
 ```
 
-LLAP Hue (after `./hiveCtl.sh start llap hue` or full `start llap`):
+LLAP Hue (see **[Hue browser access](#hue-browser-access)**; `hiveCtl.sh` does not port-forward):
 
 ```bash
 kubectl get pods,svc -n llap -l app=hue
-kubectl port-forward svc/hue -n llap 8888:8888
-# open http://localhost:8888
+kubectl wait --for=condition=ready pod -l app=hue -n llap --timeout=300s
+# kind + kind/llap-cluster.yaml → http://localhost:8888
+# otherwise → kubectl port-forward svc/hue -n llap 8888:8888 then http://localhost:8888
 ```
 
 ## Validation
