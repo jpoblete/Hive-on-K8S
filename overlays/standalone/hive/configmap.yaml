@@ -129,6 +129,17 @@ data:
        retry 5 10 microdnf -y install less vim lsof which net-tools bind-utils hostname nmap-ncat || return 1
        echo "root:${ROOT_PASSWORD}" | chpasswd
        echo "hive:${HIVE_PASSWORD}" | chpasswd
+       if ! getent group supergroup >/dev/null; then groupadd supergroup; fi
+       usermod -aG supergroup hive 2>/dev/null || usermod -G supergroup hive
+       if getent passwd admin >/dev/null; then
+          usermod -aG supergroup admin 2>/dev/null || true
+          usermod -s /bin/bash admin 2>/dev/null || true
+       else
+          useradd -m -s /bin/bash -G supergroup admin
+       fi
+       if [ -n "${ADMIN_PASSWORD:-${HIVE_PASSWORD:-}}" ]; then
+          echo "admin:${ADMIN_PASSWORD:-${HIVE_PASSWORD}}" | chpasswd
+       fi
        usermod -s /bin/bash hive
        mkdir -p "${HIVE_HOME}/log" "${HIVE_HOME}/scratch_dir" "${HIVE_HOME}/install_dir" "${HIVE_HOME}/data/warehouse"
        cp "${HIVE_HOME}"/setup/*.xml "${HIVE_HOME}/conf/"

@@ -185,11 +185,20 @@ data:
       groupadd supergroup
      fi
      if getent passwd hive >/dev/null; then
-      echo "hive user already exists"
+      usermod -aG supergroup hive 2>/dev/null || true
      else
       useradd -G supergroup hive
      fi
      echo "hive:${HIVE_PASSWORD}" | chpasswd
+     if getent passwd admin >/dev/null; then
+      usermod -aG supergroup admin 2>/dev/null || true
+      usermod -s /bin/bash admin 2>/dev/null || true
+     else
+      useradd -m -s /bin/bash -G supergroup admin
+     fi
+     if [ -n "${ADMIN_PASSWORD:-}" ]; then
+      echo "admin:${ADMIN_PASSWORD}" | chpasswd
+     fi
      host_name="$(hostname)"
      sed -i --copy "s/${host_name}/${host_name}\tnameservice/g" /etc/hosts
     }
@@ -218,7 +227,7 @@ data:
       tail -n 40 "${HADOOP_LOG_DIR}"/*-"${daemon}"-*.log "${HADOOP_LOG_DIR}"/*-"${daemon}"-*.out
     }
     #
-    sudo env ROOT_PASSWORD="${ROOT_PASSWORD}" HADOOP_PASSWORD="${HADOOP_PASSWORD}" HIVE_PASSWORD="${HIVE_PASSWORD}" /hadoop/root-tasks.sh || exit 1
+    sudo env ROOT_PASSWORD="${ROOT_PASSWORD}" HADOOP_PASSWORD="${HADOOP_PASSWORD}" HIVE_PASSWORD="${HIVE_PASSWORD}" ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" /hadoop/root-tasks.sh || exit 1
     export HADOOP_HOME=/opt/hadoop
     cp --backup=numbered /hadoop/bashrc          ${HADOOP_HOME}/.bashrc
     cp --backup=numbered /hadoop/core-site.xml   ${HADOOP_HOME}/etc/hadoop/core-site.xml
@@ -256,9 +265,10 @@ data:
          echo "Hadoop started successfully, HDFS already formatted"     
     else
          echo "Hadoop started successfully, initializing HDFS directories for Hive"
-         hdfs dfs -mkdir -p /tmp/hive /users/hive /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+         hdfs dfs -mkdir -p /tmp/hive /users/hive /users/admin /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
          hdfs dfs -chmod 777 / /tmp
          hdfs dfs -chown -R hive:supergroup /tmp/hive /users/hive /warehouse
+         hdfs dfs -chown admin:supergroup /users/admin
     fi
     #
     # Without a handler, PID 1 ignores SIGTERM and the daemons are killed when the grace period ends.

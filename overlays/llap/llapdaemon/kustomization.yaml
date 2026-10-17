@@ -92,6 +92,11 @@ patches:
               secretKeyRef:
                 name: hive-credentials
                 key: hive-password
+          - name: ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: admin-password
           - name: HIVE_LOG_HDFS_BASE
             value: "hdfs://nameservice:8020/logs/llap"
           - name: HIVE_LOG_HDFS_SYNC_INTERVAL_SEC

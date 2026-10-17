@@ -270,6 +270,27 @@ data:
        echo "hive.llap.io.enabled=${llap_io} (platform $(uname -m), hadoop checknative zlib)"
     }
     #
+    # HDFS superuser group and a login for break-glass ops (password from ADMIN_PASSWORD).
+    function ensureSupergroupLabUsers(){
+       local admin_pw="${ADMIN_PASSWORD:-${HIVE_PASSWORD:-}}"
+
+       if ! getent group supergroup >/dev/null; then
+          groupadd supergroup
+       fi
+       if getent passwd hive >/dev/null; then
+          usermod -aG supergroup hive 2>/dev/null || usermod -G supergroup hive
+       fi
+       if getent passwd admin >/dev/null; then
+          usermod -aG supergroup admin 2>/dev/null || true
+          usermod -s /bin/bash admin 2>/dev/null || true
+       else
+          useradd -m -s /bin/bash -G supergroup admin
+       fi
+       if [ -n "${admin_pw}" ]; then
+          echo "admin:${admin_pw}" | chpasswd
+       fi
+    }
+    #
     function staging(){
        #
        # Installing OS packages
@@ -278,6 +299,7 @@ data:
        retry 5 10 rpm -ivh https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-j-26.7.0-1.el9.noarch.rpm || return 1
        echo "root:${ROOT_PASSWORD}" | chpasswd
        echo "hive:${HIVE_PASSWORD}" | chpasswd
+       ensureSupergroupLabUsers
        usermod -s /bin/bash hive
        ssh-keygen -A
        exec /usr/sbin/sshd -D &

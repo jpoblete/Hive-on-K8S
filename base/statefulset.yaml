@@ -44,6 +44,11 @@ spec:
               secretKeyRef:
                 name: hive-credentials
                 key: hive-password
+          - name: ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: admin-password
           - name: HIVE_METASTORE_PASSWORD
             valueFrom:
               secretKeyRef:

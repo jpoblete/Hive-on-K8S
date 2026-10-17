@@ -102,6 +102,7 @@ function ensureSecrets(){
    local beeline_password=""
    local hue_mysql_password=""
    local hue_secret_key=""
+   local admin_password=""
    local names=""
 
    ensureNamespace "${namespace}" || return 1
@@ -118,6 +119,7 @@ function ensureSecrets(){
    beeline_password="${hive_password}"
    hue_mysql_password="$(generatePassword)"
    hue_secret_key="$(generatePassword)"
+   admin_password="$(generatePassword)"
 
    # Existing mini PVCs were initialized with the historical lab passwords.
    # Preserve compatibility so adding Secrets does not break a running metastore.
@@ -130,6 +132,7 @@ function ensureSecrets(){
          mysql_root_password="mysql"
          hive_metastore_password="hive"
          beeline_password="hive"
+         admin_password="admin"
       fi
    fi
 
@@ -141,7 +144,23 @@ function ensureSecrets(){
       --from-literal=hive-metastore-password="${hive_metastore_password}" \
       --from-literal=beeline-password="${beeline_password}" \
       --from-literal=hue-mysql-password="${hue_mysql_password}" \
-      --from-literal=hue-secret-key="${hue_secret_key}" >/dev/null
+      --from-literal=hue-secret-key="${hue_secret_key}" \
+      --from-literal=admin-password="${admin_password}" >/dev/null
+}
+# Add admin-password to an existing secret (clusters created before the admin OS user).
+function ensureAdminSecrets(){
+   local namespace="$1"
+   local admin_password=""
+   local existing=""
+
+   ensureSecrets "${namespace}" || return 1
+   existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.admin-password}' 2>/dev/null)" || return 1
+   if [ -n "${existing}" ]; then
+      return 0
+   fi
+   admin_password="$(generatePassword)"
+   kubectl patch secret hive-credentials -n "${namespace}" --type merge \
+      -p "{\"stringData\":{\"admin-password\":\"${admin_password}\"}}" >/dev/null
 }
 # Add Hue credentials to an existing llap secret (for clusters created before Hue).
 function ensureHueSecrets(){
@@ -320,6 +339,7 @@ function startOverlay(){
          if overlayExists "${target}"; then
             echo "Starting Overlay: ${target} ..."
             ensureSecrets "${namespace}" || return 1
+            ensureAdminSecrets "${namespace}" || return 1
             if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
                ensureHueSecrets "${namespace}" || return 1
             fi
@@ -485,6 +505,7 @@ function startStack(){
          ;;
       llap)
          ensureHueSecrets "${namespace}" || return 1
+         ensureAdminSecrets "${namespace}" || return 1
          llapNodeArchSummary
          components=(hadoop mysql zookeeper hivemetastore llapdaemon hiveserver2 hue)
          ;;
@@ -939,10 +960,11 @@ function restoreStack(){
          for path in /tmp/hdfs-restore/hdfs-backup/*; do
             hdfs dfs -put "${path}" /
          done
-         hdfs dfs -mkdir -p /tmp/hive /users/hive /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+         hdfs dfs -mkdir -p /tmp/hive /users/hive /users/admin /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
          hdfs dfs -chmod 777 / /tmp
          hdfs dfs -chmod -R 777 /tmp/hive
          hdfs dfs -chown -R hive:supergroup /tmp/hive /users/hive /warehouse /opt || true
+         hdfs dfs -chown admin:supergroup /users/admin 2>/dev/null || true
       ' || status=1
    fi
 

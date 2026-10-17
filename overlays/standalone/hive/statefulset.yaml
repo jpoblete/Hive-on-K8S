@@ -44,6 +44,11 @@ spec:
                 secretKeyRef:
                   name: hive-credentials
                   key: hive-password
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: admin-password
             - name: BEELINE_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -96,6 +101,11 @@ spec:
                 secretKeyRef:
                   name: hive-credentials
                   key: hive-password
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: admin-password
             - name: BEELINE_PASSWORD
               valueFrom:
                 secretKeyRef:
