@@ -49,7 +49,7 @@ data:
     set -euo pipefail
     # startup.sh runs migrate then supervisor; migrate leaves a supervisor that
     # Gunicorn cleanup kills. Schema is migrated in init; run supervisor only.
-    test -f /usr/share/hue/desktop/conf/hue.ini || /config/render-hue-ini.sh
+    /config/render-hue-ini.sh
     cd /usr/share/hue
     exec ./build/env/bin/supervisor
   hue.ini.template: |
@@ -79,6 +79,7 @@ data:
 
     [notebook]
     enable_all_interpreters=false
+    interpreters_shown_on_wheel=hive
     [[interpreters]]
     [[[hive]]]
     name=Hive
