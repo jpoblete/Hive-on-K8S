@@ -29,6 +29,7 @@ The manifests intentionally complete the images at pod startup by installing sma
 - [KIND cluster for `llap`](#kind-cluster-for-llap)
 - [Profiles](#profiles) — `standalone`, `mini`, [`llap`](#llap)
 - [Data Safety](#data-safety)
+- [Lab OS users (`supergroup`)](#lab-os-users-supergroup)
 - [Smoke Tests](#smoke-tests)
 
 ## Images by profile
@@ -463,6 +464,19 @@ PVCs hold the persistent data. Deleting PVCs can cause data loss.
 hive-credentials.secret.json
 ```
 
+Typical keys in Secret **`hive-credentials`** (namespace = profile name):
+
+| Key | Used for |
+|-----|----------|
+| `root-password` | `root` in Hive/Hadoop pods (bootstrap only) |
+| `hive-password` | Unix `hive`, SSH between Hive pods |
+| `hadoop-password` | Unix `hadoop` in the Hadoop pod |
+| `beeline-password` | Beeline / JDBC user **`hive`** |
+| `hive-metastore-password` | MySQL user for the Hive metastore schema |
+| `mysql-root-password` | MySQL `root` |
+| `admin-password` | Documented copy of the fixed lab **`admin`** password (always **`admin`**) |
+| `hue-mysql-password`, `hue-secret-key` | **`llap`** Hue only |
+
 Treat backup directories as sensitive because they contain both data and credentials.
 
 `stop` keeps the PVCs and gives each pod its grace period to shut its services down cleanly. When the Kubernetes API can't be reached, `hiveCtl.sh` reports the error and stops rather than treating components as stopped or missing.
@@ -500,7 +514,7 @@ The startup scripts use `root` to:
 - install missing packages with retry logic (Hadoop installs its tools in the background and keeps the RPMs on its volume under `/hdfs/rpm-cache`, so only the first start of a new volume needs the CentOS mirrors)
 - copy mounted ConfigMap files into Hive/Hadoop config directories
 - prepare users, permissions, SSH, and symlinks
-- ensure Unix group **`supergroup`**, add **`hive`** to it, and create OS user **`admin`** (also in **`supergroup`**) with fixed lab password **`admin`** / **`admin`** — useful for `kubectl exec` / SSH debugging and HDFS paths owned `*:supergroup`
+- ensure Unix group **`supergroup`**, add **`hive`** to it, and create OS user **`admin`** (also in **`supergroup`**) with fixed lab password **`admin`** — see **[Lab OS users](#lab-os-users-supergroup)**
 
 The long-running services then run as:
 
@@ -517,6 +531,40 @@ kubectl exec hadoop-0 -n mini -- ls -l /hdfs/logs
 ```
 
 Deleting the Hadoop pod stops the HDFS daemons cleanly, in reverse start order, instead of waiting out the grace period. YARN stays configured but isn't started, since HiveServer2 runs Tez itself; to bring it back, add the ResourceManager and NodeManager to the daemon list in `components/hadoop/configmap.yaml`.
+
+## Lab OS users (`supergroup`)
+
+Hadoop treats members of Unix group **`supergroup`** like a superuser group for HDFS (similar to a default **`hdfs`** admin group). This lab creates **`supergroup`** at pod bootstrap and puts both service and break-glass users in it.
+
+| Unix user | Password (this exercise) | Group(s) | Where created | Runs long-lived service? |
+|-----------|---------------------------|----------|---------------|---------------------------|
+| **`hive`** | `hive-password` in Secret (random; **`hive`** on legacy **mini** PVC) | **`supergroup`**, `hive` | Hive + Hadoop bootstrap | Yes — Metastore, HS2, LLAP |
+| **`admin`** | **`admin`** (fixed; also stored as `admin-password` in Secret) | **`supergroup`**, `admin` | Hive + Hadoop bootstrap | No — interactive / debugging |
+| **`hadoop`** | `hadoop-password` in Secret | (image default) | Hadoop bootstrap | Yes — HDFS daemons |
+| **`root`** | `root-password` in Secret | — | bootstrap only | No — installs packages, then services drop privileges |
+
+**Not for production** — fixed **`admin`/`admin`** is intentional for local labs only.
+
+On **`mini`** / **`llap`**, first HDFS format (Hadoop pod) creates **`/users/admin`** owned **`admin:supergroup`**, alongside **`/users/hive`** and warehouse paths owned **`hive:supergroup`**.
+
+Log in as **`admin`** inside a Hive pod:
+
+```bash
+kubectl exec -it hiveserver2-0 -n llap -- su - admin
+# password: admin
+id    # should list supergroup
+```
+
+Same on **`hadoop-0`** for HDFS CLI as **`admin`**:
+
+```bash
+kubectl exec -it hadoop-0 -n llap -- su - admin
+hdfs dfs -ls /
+```
+
+After upgrading manifests, **restart** Hive/Hadoop pods (or `./hiveCtl.sh restart <profile> <component>`) so **`staging.sh`** / **`root-tasks.sh`** recreate group membership. Existing clusters get **`admin-password`** patched to **`admin`** on the next `./hiveCtl.sh start`.
+
+Implementation: **`ensureSupergroupLabUsers`** in `base/configmap.yaml` (Hive), matching logic in `components/hadoop/configmap.yaml` and `overlays/standalone/hive/configmap.yaml`.
 
 ## Smoke Tests
 
@@ -562,6 +610,12 @@ kubectl exec hiveserver2-0 -n llap -it -- /bin/bash
 su - hive
 beeline -e "show databases;"
 beeline -e "select count(*) from managed_3_1;"
+```
+
+LLAP **`admin`** OS user (`admin` / `admin`, **`supergroup`**):
+
+```bash
+kubectl exec hiveserver2-0 -n llap -it -- su - admin -c 'id && hdfs dfs -ls /users 2>/dev/null || true'
 ```
 
 LLAP Hue — see **[Access Hue (llap profile)](#access-hue-llap-profile)**:
