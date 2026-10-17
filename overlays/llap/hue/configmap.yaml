@@ -58,7 +58,7 @@ data:
     http_host=0.0.0.0
     http_port=8888
     use_allowed_hosts=false
-    app_blacklist=search,hbase,oozie,pig,sqoop,zookeeper,security,spark,jobbrowser
+    app_blacklist=search,hbase,oozie,pig,sqoop,zookeeper,security,spark,jobbrowser,impala
 
     [[database]]
     engine=mysql
@@ -78,6 +78,7 @@ data:
     close_queries=open
 
     [notebook]
+    enable_all_interpreters=false
     [[interpreters]]
     [[[hive]]]
     name=Hive

@@ -92,7 +92,7 @@ kubectl port-forward svc/hue -n llap 8888:8888
 
 **NodePort only:** Service **`hue`** publishes **30888** (`overlays/llap/hue/service.yaml`) — try **http://localhost:30888** on Docker Desktop, or `http://<node-ip>:30888`.
 
-First visit: complete Hue’s setup wizard, then use the **Hive** interpreter (user **`hive`**, password **`beeline-password`** in Secret `hive-credentials`).
+First visit: complete Hue’s setup wizard. The SQL editor lists **Hive** only (**Impala** is disabled via `app_blacklist` in `overlays/llap/hue/configmap.yaml`). Hive login uses user **`hive`** and **`beeline-password`** from Secret `hive-credentials`.
 
 More detail: **[`llap` profile → Hue](#hue-llap-sql-ui)**.
 
