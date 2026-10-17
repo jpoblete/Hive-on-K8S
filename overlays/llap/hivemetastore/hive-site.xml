@@ -127,6 +127,7 @@
          <name>hive.server2.zookeeper.namespace</name>
          <value>hiveserver2</value>
       </property>
+      <!-- Default true for amd64; staging.sh sets false when hadoop checknative zlib is unavailable (e.g. aarch64 + x86_64 natives). -->
       <property>
          <name>hive.llap.io.enabled</name>
          <value>true</value>

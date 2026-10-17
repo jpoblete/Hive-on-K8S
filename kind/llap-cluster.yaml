@@ -11,6 +11,8 @@
 # Create:
 #   kind create cluster --name desktop --config kind/llap-cluster.yaml
 #
+# Hue: control-plane extraPortMappings expose NodePort 30888 at http://localhost:8888
+#
 # Requires Docker Desktop (or similar) with enough RAM/disk for llap (see README).
 
 kind: Cluster
@@ -18,6 +20,11 @@ apiVersion: kind.x-k8s.io/v1alpha4
 name: desktop
 nodes:
   - role: control-plane
+    extraPortMappings:
+      # Hue NodePort (30888) → http://localhost:8888 on the host
+      - containerPort: 30888
+        hostPort: 8888
+        protocol: TCP
   - role: worker
   - role: worker
   - role: worker

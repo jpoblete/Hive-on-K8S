@@ -125,6 +125,10 @@ data:
     
     # Set HADOOP_HOME to point to a specific hadoop install directory
     export HADOOP_HOME=/opt/hadoop
+    if [ -d "${HADOOP_HOME}/lib/native" ]; then
+       export JAVA_LIBRARY_PATH="${HADOOP_HOME}/lib/native${JAVA_LIBRARY_PATH:+:${JAVA_LIBRARY_PATH}}"
+       export LD_LIBRARY_PATH="${HADOOP_HOME}/lib/native${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    fi
     
     # Hive Configuration Directory can be controlled by:
     export HIVE_CONF_DIR=/opt/hive/conf
@@ -184,7 +188,8 @@ data:
        export LLAP_LOG4J2_PROPERTIES_FILE_NAME=llap-daemon-log4j2.properties
        LLAP_DAEMON_USER_CLASSPATH="$($HADOOP_HOME/bin/hadoop classpath)"
        export LLAP_DAEMON_USER_CLASSPATH
-       export LLAP_DAEMON_OPTS="$LLAP_DAEMON_OPTS --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED \
+       export LLAP_DAEMON_OPTS="$LLAP_DAEMON_OPTS -Djava.library.path=${HADOOP_HOME}/lib/native \
+         --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED \
          --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED \
          --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED \
          --add-opens java.base/java.util.regex=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED \
@@ -244,6 +249,27 @@ data:
        done
     }
     #
+    # LLAP IO needs Hadoop native zlib (ORC on encoded paths). Images often ship x86_64
+    # libhadoop.so while KIND nodes may be aarch64 — tune hive-site at pod bootstrap.
+    function configureHiveLlapIoEnabled(){
+       local site="${HIVE_HOME}/conf/hive-site.xml"
+       local llap_io="true"
+
+       [ -f "${site}" ] || return 0
+       grep -q 'hive.llap.io.enabled' "${site}" || return 0
+       if [ -d "${HADOOP_HOME}/lib/native" ]; then
+          if ! JAVA_LIBRARY_PATH="${HADOOP_HOME}/lib/native" \
+               HADOOP_OPTS="-Djava.library.path=${HADOOP_HOME}/lib/native" \
+               "${HADOOP_HOME}/bin/hadoop" checknative -a 2>/dev/null | grep -qE 'zlib:[[:space:]]+true'; then
+             llap_io="false"
+          fi
+       else
+          llap_io="false"
+       fi
+       sed -i "/<name>hive.llap.io.enabled<\/name>/,/<\/property>/ s|<value>.*</value>|<value>${llap_io}</value>|" "${site}"
+       echo "hive.llap.io.enabled=${llap_io} (platform $(uname -m), hadoop checknative zlib)"
+    }
+    #
     function staging(){
        #
        # Installing OS packages
@@ -278,6 +304,7 @@ data:
        if [ -n "${HIVE_METASTORE_PASSWORD:-}" ]; then
           sed -i "s/__HIVE_METASTORE_PASSWORD__/${HIVE_METASTORE_PASSWORD}/g" "${HIVE_HOME}/conf/hive-site.xml"
        fi
+       configureHiveLlapIoEnabled || true
        if [ "${SERVICE}" = "hiveserver2" ] && [ -f "${HIVE_HOME}/setup/createTable.sh" ]; then
           cp "${HIVE_HOME}/setup/createTable.sh" "${HIVE_HOME}/bin/createTable.sh"
           chmod +x "${HIVE_HOME}/bin/createTable.sh"

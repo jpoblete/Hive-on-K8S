@@ -28,6 +28,7 @@ The manifests intentionally complete the images at pod startup by installing sma
 standalone:   apache/hive:4.2.0   (embedded Metastore + HiveServer2 in one pod)
 mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
 llap:         apache/hive:nightly (Hive Metastore x2, HiveServer2 x2, LLAP daemon x2)
+              gethue/hue:latest (Hue SQL UI; llap only)
 ```
 
 `mini` and `standalone` pin the released **4.2.0** image. **`llap` uses the moving `nightly` tag** (Beeline reports **4.3.0-SNAPSHOT** today) so Tez and LLAP pick up fixes not in 4.2.0—notably [HIVE-29566](https://issues.apache.org/jira/browse/HIVE-29566), where reopening a Tez session in the same HiveServer2 JVM could fail with `JvmMetrics already exists` on grouped/aggregating queries. After an image bump, metastore pods run `schematool` on startup if the schema version changed. Leave headroom on kind or Docker Desktop nodes when pulling `nightly` (~1.5 GiB per node that schedules a Hive pod). To pin `llap` to a release tag again, change the image patch in `overlays/llap/hivemetastore/kustomization.yaml`, `overlays/llap/hiveserver2/kustomization.yaml`, and `overlays/llap/llapdaemon/kustomization.yaml`.
@@ -130,6 +131,7 @@ Hadoop pod:      6 Gi limit for multiple 1 Gi Hadoop JVMs
 MySQL pod:       2 Gi limit
 LLAP daemons:    5 Gi limit for 3 Gi heap + 1 Gi off-heap cache
 ZooKeeper pod:   512 Mi limit for 256 Mi heap
+Hue pod:         2 Gi limit (768 Mi request); uses MySQL database `hue` on the llap mysql Service
 ```
 
 ## Profiles
@@ -300,10 +302,12 @@ Cleanup mini data and namespace:
 `llap` is `mini` plus ZooKeeper and two Hive LLAP daemons. Hive pods use **`apache/hive:nightly`** (see **Images by profile**); that build includes the HIVE-29566 Tez-session fix, which matters here because HiveServer2 keeps a Tez session pool warm for LLAP while clients run many queries in the same JVM.
 
 ```text
-hadoop -> mysql -> zookeeper -> hivemetastore -> llapdaemon (x2) -> hiveserver2
+hadoop -> mysql -> zookeeper -> hivemetastore -> llapdaemon (x2) -> hiveserver2 -> hue
 ```
 
 The LLAP daemons register in ZooKeeper as the `@llap0` cluster. The Tez application master runs inside HiveServer2 (Tez local mode, because the Hadoop pod doesn't start YARN) and sends query fragments to the daemons, which run them on their executors and cache column data off-heap (LLAP IO). HiveServer2 opens a single Tez session at startup and queries take turns on it: inside HiveServer2's JVM, only the first Tez application master can start the LLAP scheduler. Hive Metastore, HiveServer2, and the daemons share `overlays/llap/hivemetastore/hive-site.xml`.
+
+On each Hive pod start, **`staging.sh`** runs **`hadoop checknative`** and sets **`hive.llap.io.enabled`** to `true` only when native **zlib** loads (typical on **linux/amd64**). On **aarch64** nodes with **x86_64** Hadoop natives in the image (common on Apple Silicon KIND), it sets `false` so Iceberg/ORC GROUP BY uses Java decompression instead of failing with `ZlibDecompressor` errors. `./hiveCtl.sh start llap` prints LLAP worker node architecture(s) as a hint; no manual edit is required. Restart Hive pods after changing the cluster or image so staging re-runs.
 
 HiveServer2 registers in ZooKeeper too, and Beeline looks it up there: in `llap`, `BEELINE_URL` points at the `zookeeper` Service, which gives ZooKeeper a stable address (a single ZooKeeper server needs no headless Service). From any Hive pod in the namespace:
 
@@ -325,6 +329,8 @@ kubectl exec hadoop-0 -n llap -- hdfs dfs -cat hdfs://nameservice:8020/logs/llap
 ```
 
 HiveServer2 runs **two** replicas. Each pod registers in ZooKeeper under `/hiveserver2` with its headless-Service FQDN (`setHostnameAsFQDN` + `hiveserver2-headless`). Beeline and JDBC clients use the ZooKeeper URL in `BEELINE_URL`, so they discover whichever instances are registered without pinning to the `hiveserver2` ClusterIP Service.
+
+The **`hiveserver2` ClusterIP Service** (`hiveserver2.llap.svc.cluster.local:10000`) keeps **ClientIP session affinity** (from `base/service.yaml`). Clients that cannot use ZooKeeper JDBC—**Hue**—connect there so the Hue pod’s source IP stays pinned to one HiveServer2 replica for up to an hour.
 
 Hive Metastore runs **two** replicas behind the `hivemetastore` Service. Clients keep the single URI `thrift://hivemetastore.llap.svc.cluster.local:9083`; the Service uses **ClientIP** session affinity (one hour), so a given client IP is steered to the same pod rather than round-robin. If that pod goes away, **new** connections from the same client are sent to a healthy backend; long-lived Thrift sessions must reconnect (HiveServer2 opens fresh Beeline sessions each time).
 
@@ -363,6 +369,31 @@ Open an LLAP daemon web UI at <http://localhost:15002>:
 
 ```bash
 kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
+```
+
+**Hue** (`gethue/hue`) starts after HiveServer2. It uses the shared MySQL server for its own `hue` database (credentials in `hive-credentials`: `hue-mysql-password`, `hue-secret-key`). Hive queries go to **`hiveserver2.llap.svc.cluster.local:10000`** with user **`hive`** and the same password as Beeline (`beeline-password` in the Secret). Existing `llap` namespaces get Hue keys patched on the next `./hiveCtl.sh start llap` or `start llap hue`.
+
+Open Hue in a browser:
+
+```bash
+# kind with kind/llap-cluster.yaml (maps host :8888 → NodePort 30888):
+open http://localhost:8888
+
+# Any cluster — port-forward:
+kubectl port-forward svc/hue -n llap 8888:8888
+# then http://localhost:8888
+
+# Docker Desktop Kubernetes — NodePort without port-forward:
+open http://localhost:30888
+```
+
+Complete the Hue first-login wizard in the browser (create the Hue admin user). The Hive interpreter appears as **Hive** in the query editor.
+
+Start or stop Hue alone:
+
+```bash
+./hiveCtl.sh start llap hue
+./hiveCtl.sh stop llap hue
 ```
 
 Back up, restore, and cleanup work the same as `mini`:
@@ -483,6 +514,14 @@ beeline -e "show databases;"
 beeline -e "select count(*) from managed_3_1;"
 ```
 
+LLAP Hue (after `./hiveCtl.sh start llap hue` or full `start llap`):
+
+```bash
+kubectl get pods,svc -n llap -l app=hue
+kubectl port-forward svc/hue -n llap 8888:8888
+# open http://localhost:8888
+```
+
 ## Validation
 
 Render all overlays:
@@ -490,7 +529,7 @@ Render all overlays:
 ```bash
 for d in overlays/standalone/hive \
          overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 \
-         overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2; do
+         overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2 overlays/llap/hue; do
   kustomize build "$d" --load-restrictor LoadRestrictionsNone | kubectl apply --dry-run=client -f -
 done
 ```

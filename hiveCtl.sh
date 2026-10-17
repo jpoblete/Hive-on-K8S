@@ -96,6 +96,8 @@ function ensureSecrets(){
    local mysql_root_password=""
    local hive_metastore_password=""
    local beeline_password=""
+   local hue_mysql_password=""
+   local hue_secret_key=""
    local names=""
 
    ensureNamespace "${namespace}" || return 1
@@ -110,6 +112,8 @@ function ensureSecrets(){
    mysql_root_password="$(generatePassword)"
    hive_metastore_password="$(generatePassword)"
    beeline_password="${hive_password}"
+   hue_mysql_password="$(generatePassword)"
+   hue_secret_key="$(generatePassword)"
 
    # Existing mini PVCs were initialized with the historical lab passwords.
    # Preserve compatibility so adding Secrets does not break a running metastore.
@@ -131,7 +135,27 @@ function ensureSecrets(){
       --from-literal=hadoop-password="${hadoop_password}" \
       --from-literal=mysql-root-password="${mysql_root_password}" \
       --from-literal=hive-metastore-password="${hive_metastore_password}" \
-      --from-literal=beeline-password="${beeline_password}" >/dev/null
+      --from-literal=beeline-password="${beeline_password}" \
+      --from-literal=hue-mysql-password="${hue_mysql_password}" \
+      --from-literal=hue-secret-key="${hue_secret_key}" >/dev/null
+}
+# Add Hue credentials to an existing llap secret (for clusters created before Hue).
+function ensureHueSecrets(){
+   local namespace="$1"
+   local hue_mysql_password=""
+   local hue_secret_key=""
+   local existing=""
+
+   [ "${namespace}" = "llap" ] || return 0
+   ensureSecrets "${namespace}" || return 1
+   existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.hue-mysql-password}' 2>/dev/null)" || return 1
+   if [ -n "${existing}" ]; then
+      return 0
+   fi
+   hue_mysql_password="$(generatePassword)"
+   hue_secret_key="$(generatePassword)"
+   kubectl patch secret hive-credentials -n "${namespace}" --type merge \
+      -p "{\"stringData\":{\"hue-mysql-password\":\"${hue_mysql_password}\",\"hue-secret-key\":\"${hue_secret_key}\"}}" >/dev/null
 }
 # Save the generated namespace credentials in a portable backup manifest.
 function backupSecrets(){
@@ -224,15 +248,26 @@ function overlayActive(){
    local target="$1"
    local names=""
 
-   names="$(kubectlNames statefulsets -n "${target%_*}" --selector="app=${target#*_}")" || return 2
+   local namespace="${target%_*}"
+   local service="${target#*_}"
+
+   names="$(kubectlNames statefulsets -n "${namespace}" --selector="app=${service}")" || return 2
+   if [ -n "${names}" ]; then
+      return 0
+   fi
+   names="$(kubectlNames deployments -n "${namespace}" --selector="app=${service}")" || return 2
    [ -n "${names}" ]
 }
-# Wait until every replica of a component StatefulSet reports Ready.
+# Wait until every replica of a component StatefulSet or Deployment reports Ready.
 function waitForReady(){
    local namespace="$1"
    local service="$2"
 
-   kubectl rollout status "statefulset/${service}" -n "${namespace}" --timeout=600s
+   if kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
+      kubectl rollout status "statefulset/${service}" -n "${namespace}" --timeout=600s
+   else
+      kubectl rollout status "deployment/${service}" -n "${namespace}" --timeout=600s
+   fi
 }
 # Wait until none of the objects selected by the kubectl get arguments exist.
 function waitForDeleted(){
@@ -258,7 +293,7 @@ function waitForStopped(){
    local namespace="$1"
    local service="$2"
 
-   waitForDeleted 180 statefulsets,pods -n "${namespace}" --selector="app=${service}"
+   waitForDeleted 180 statefulsets,deployments,pods -n "${namespace}" --selector="app=${service}"
 }
 # Start one overlay/component and wait for its pod readiness.
 function startOverlay(){
@@ -281,6 +316,9 @@ function startOverlay(){
          if overlayExists "${target}"; then
             echo "Starting Overlay: ${target} ..."
             ensureSecrets "${namespace}" || return 1
+            if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
+               ensureHueSecrets "${namespace}" || return 1
+            fi
             #kubectl apply -k "${overlay_path}"
             kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
             waitForReady "${namespace}" "${service}"
@@ -318,12 +356,24 @@ function stopOverlay(){
    esac
 
    echo "Stopping Overlay: ${target} ..."
-   resources="$(kubectlNames sts,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
+   resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
    # Not forced: each pod gets its termination grace period to shut its services down cleanly
    for resource in ${resources}; do
       kubectl delete "${resource}" -n "${namespace}" --wait=false || return 1
    done
    waitForStopped "${namespace}" "${service}"
+}
+# Summarize node CPU arch for llap (Hive pods auto-tune hive.llap.io.enabled at bootstrap).
+function llapNodeArchSummary(){
+   local archs=""
+
+   archs="$(kubectl get nodes -l node-role.kubernetes.io/llap -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{" "}{end}' 2>/dev/null | xargs echo)"
+   if [ -z "${archs}" ]; then
+      archs="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{" "}{end}' 2>/dev/null | xargs echo)"
+   fi
+   if [ -n "${archs}" ]; then
+      echo "LLAP worker node architecture(s): ${archs} (hive.llap.io.enabled is set per pod via hadoop checknative in staging.sh)"
+   fi
 }
 # Start all components in dependency order.
 function startStack(){
@@ -336,7 +386,9 @@ function startStack(){
          components=(hive)
          ;;
       llap)
-         components=(hadoop mysql zookeeper hivemetastore llapdaemon hiveserver2)
+         ensureHueSecrets "${namespace}" || return 1
+         llapNodeArchSummary
+         components=(hadoop mysql zookeeper hivemetastore llapdaemon hiveserver2 hue)
          ;;
       *)
          components=(hadoop mysql hivemetastore hiveserver2)
@@ -360,7 +412,7 @@ function stopStack(){
          components=(hive)
          ;;
       llap)
-         components=(hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
+         components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
          ;;
       *)
          components=(hiveserver2 hivemetastore mysql hadoop)
