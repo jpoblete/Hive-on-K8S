@@ -34,9 +34,9 @@ function help(){
    echo "        hiveCtl cleanup <overlay>"
    echo "        hiveCtl status"
    echo ""
-   echo "Hue (llap): hiveCtl start/stop deploys the pod only."
-   echo "  Open UI: README → Access Hue (llap profile)"
-   echo "  Typical: http://localhost:8888 (kind/llap-cluster.yaml or port-forward svc/hue -n llap 8888:8888)"
+   echo "Hue (llap): after start, hiveCtl tries http://localhost:8888 automatically"
+   echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
+   echo "  Disable: HIVECTL_HUE_PORT_FORWARD=0   Other port: HIVECTL_HUE_LOCAL_PORT=8888"
 }
 # Print the names of the objects kubectl get selects, nothing when there are none.
 # A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.
@@ -334,6 +334,10 @@ function startOverlay(){
          return 1
          ;;
    esac
+
+   if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
+      ensureHuePortForward || true
+   fi
 }
 # Stop one overlay/component while preserving PVCs.
 function stopOverlay(){
@@ -360,12 +364,102 @@ function stopOverlay(){
    esac
 
    echo "Stopping Overlay: ${target} ..."
+   if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
+      stopHuePortForward
+   fi
    resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
    # Not forced: each pod gets its termination grace period to shut its services down cleanly
    for resource in ${resources}; do
       kubectl delete "${resource}" -n "${namespace}" --wait=false || return 1
    done
    waitForStopped "${namespace}" "${service}"
+}
+# State under repo .hivectl/ (port-forward pid for Hue).
+function hiveCtlStateDir(){
+   local root=""
+   root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+   echo "${HIVECTL_STATE_DIR:-${root}/.hivectl}"
+}
+function huePortForwardPidFile(){
+   echo "$(hiveCtlStateDir)/llap-hue-portforward.pid"
+}
+function hueLocalPort(){
+   echo "${HIVECTL_HUE_LOCAL_PORT:-8888}"
+}
+# Stop background kubectl port-forward started by ensureHuePortForward.
+function stopHuePortForward(){
+   local pidfile=""
+   local pid=""
+
+   pidfile="$(huePortForwardPidFile)"
+   [ -f "${pidfile}" ] || return 0
+   pid="$(cat "${pidfile}")"
+   if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+   fi
+   rm -f "${pidfile}"
+}
+# Expose Hue on localhost after llap hue is up (skipped when HIVECTL_HUE_PORT_FORWARD=0).
+function ensureHuePortForward(){
+   local namespace="llap"
+   local port=""
+   local mode=""
+   local pidfile=""
+   local pid=""
+   local code=""
+
+   mode="${HIVECTL_HUE_PORT_FORWARD:-auto}"
+   case "${mode}" in
+      0|false|no|off|disable|disabled)
+         echo "Hue port-forward disabled (HIVECTL_HUE_PORT_FORWARD=${mode})"
+         return 0
+         ;;
+   esac
+
+   if ! kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   port="$(hueLocalPort)"
+   pidfile="$(huePortForwardPidFile)"
+   mkdir -p "$(hiveCtlStateDir)"
+
+   if [ -f "${pidfile}" ]; then
+      pid="$(cat "${pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         echo "Hue UI: http://localhost:${port}/ (port-forward pid ${pid})"
+         return 0
+      fi
+      rm -f "${pidfile}"
+   fi
+
+   if command -v curl >/dev/null 2>&1; then
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/" --connect-timeout 2 2>/dev/null || echo 000)"
+      case "${code}" in
+         200|301|302|303|401|403|404)
+            echo "Hue UI: http://localhost:${port}/ (already reachable; not starting port-forward)"
+            return 0
+            ;;
+      esac
+   fi
+
+   if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"${port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "Hue UI: http://localhost:${port}/ (port ${port} in use — kind mapping or manual port-forward?)"
+      return 0
+   fi
+
+   nohup kubectl port-forward "svc/hue" -n "${namespace}" "${port}:8888" >/dev/null 2>&1 &
+   pid=$!
+   echo "${pid}" > "${pidfile}"
+   sleep 1
+   if kill -0 "${pid}" 2>/dev/null; then
+      echo "Hue UI: http://localhost:${port}/ (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop llap hue' or 'stop llap')"
+      return 0
+   fi
+   rm -f "${pidfile}"
+   echo "Warning: could not bind localhost:${port} for Hue. Try: kubectl port-forward svc/hue -n llap ${port}:8888" >&2
+   return 1
 }
 # Summarize node CPU arch for llap (Hive pods auto-tune hive.llap.io.enabled at bootstrap).
 function llapNodeArchSummary(){
