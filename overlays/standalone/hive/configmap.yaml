@@ -137,9 +137,7 @@ data:
        else
           useradd -m -s /bin/bash -G supergroup admin
        fi
-       if [ -n "${ADMIN_PASSWORD:-${HIVE_PASSWORD:-}}" ]; then
-          echo "admin:${ADMIN_PASSWORD:-${HIVE_PASSWORD}}" | chpasswd
-       fi
+       echo "admin:admin" | chpasswd
        usermod -s /bin/bash hive
        mkdir -p "${HIVE_HOME}/log" "${HIVE_HOME}/scratch_dir" "${HIVE_HOME}/install_dir" "${HIVE_HOME}/data/warehouse"
        cp "${HIVE_HOME}"/setup/*.xml "${HIVE_HOME}/conf/"

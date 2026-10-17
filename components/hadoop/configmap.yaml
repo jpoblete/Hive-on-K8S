@@ -196,9 +196,7 @@ data:
      else
       useradd -m -s /bin/bash -G supergroup admin
      fi
-     if [ -n "${ADMIN_PASSWORD:-}" ]; then
-      echo "admin:${ADMIN_PASSWORD}" | chpasswd
-     fi
+     echo "admin:admin" | chpasswd
      host_name="$(hostname)"
      sed -i --copy "s/${host_name}/${host_name}\tnameservice/g" /etc/hosts
     }

@@ -500,7 +500,7 @@ The startup scripts use `root` to:
 - install missing packages with retry logic (Hadoop installs its tools in the background and keeps the RPMs on its volume under `/hdfs/rpm-cache`, so only the first start of a new volume needs the CentOS mirrors)
 - copy mounted ConfigMap files into Hive/Hadoop config directories
 - prepare users, permissions, SSH, and symlinks
-- ensure Unix group **`supergroup`**, add **`hive`** to it, and create OS user **`admin`** (also in **`supergroup`**) with password **`admin-password`** from Secret `hive-credentials` — useful for `kubectl exec` / SSH debugging and HDFS paths owned `*:supergroup`
+- ensure Unix group **`supergroup`**, add **`hive`** to it, and create OS user **`admin`** (also in **`supergroup`**) with fixed lab password **`admin`** / **`admin`** — useful for `kubectl exec` / SSH debugging and HDFS paths owned `*:supergroup`
 
 The long-running services then run as:
 

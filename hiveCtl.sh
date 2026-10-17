@@ -119,7 +119,7 @@ function ensureSecrets(){
    beeline_password="${hive_password}"
    hue_mysql_password="$(generatePassword)"
    hue_secret_key="$(generatePassword)"
-   admin_password="$(generatePassword)"
+   admin_password="admin"
 
    # Existing mini PVCs were initialized with the historical lab passwords.
    # Preserve compatibility so adding Secrets does not break a running metastore.
@@ -132,7 +132,6 @@ function ensureSecrets(){
          mysql_root_password="mysql"
          hive_metastore_password="hive"
          beeline_password="hive"
-         admin_password="admin"
       fi
    fi
 
@@ -158,9 +157,8 @@ function ensureAdminSecrets(){
    if [ -n "${existing}" ]; then
       return 0
    fi
-   admin_password="$(generatePassword)"
    kubectl patch secret hive-credentials -n "${namespace}" --type merge \
-      -p "{\"stringData\":{\"admin-password\":\"${admin_password}\"}}" >/dev/null
+      -p '{"stringData":{"admin-password":"admin"}}' >/dev/null
 }
 # Add Hue credentials to an existing llap secret (for clusters created before Hue).
 function ensureHueSecrets(){

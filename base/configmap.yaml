@@ -270,10 +270,8 @@ data:
        echo "hive.llap.io.enabled=${llap_io} (platform $(uname -m), hadoop checknative zlib)"
     }
     #
-    # HDFS superuser group and a login for break-glass ops (password from ADMIN_PASSWORD).
+    # HDFS superuser group and lab login admin:admin (see README).
     function ensureSupergroupLabUsers(){
-       local admin_pw="${ADMIN_PASSWORD:-${HIVE_PASSWORD:-}}"
-
        if ! getent group supergroup >/dev/null; then
           groupadd supergroup
        fi
@@ -286,9 +284,7 @@ data:
        else
           useradd -m -s /bin/bash -G supergroup admin
        fi
-       if [ -n "${admin_pw}" ]; then
-          echo "admin:${admin_pw}" | chpasswd
-       fi
+       echo "admin:admin" | chpasswd
     }
     #
     function staging(){
