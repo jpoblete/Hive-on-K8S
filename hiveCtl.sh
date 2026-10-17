@@ -37,6 +37,8 @@ function help(){
    echo "Hue (llap): after start, hiveCtl tries http://localhost:8888 automatically"
    echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
    echo "  Disable: HIVECTL_HUE_PORT_FORWARD=0   Other port: HIVECTL_HUE_LOCAL_PORT=8888"
+   echo "LLAP daemon UI: http://localhost:15002 after start llapdaemon (pod llapdaemon-0)"
+   echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
 }
 # Print the names of the objects kubectl get selects, nothing when there are none.
 # A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.
@@ -356,6 +358,9 @@ function startOverlay(){
    if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
       ensureHuePortForward || true
    fi
+   if [ "${namespace}" = "llap" ] && [ "${service}" = "llapdaemon" ]; then
+      ensureLlapDaemonPortForward || true
+   fi
 }
 # Stop one overlay/component while preserving PVCs.
 function stopOverlay(){
@@ -384,6 +389,9 @@ function stopOverlay(){
    echo "Stopping Overlay: ${target} ..."
    if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
       stopHuePortForward
+   fi
+   if [ "${namespace}" = "llap" ] && [ "${service}" = "llapdaemon" ]; then
+      stopLlapDaemonPortForward
    fi
    resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
    # Not forced: each pod gets its termination grace period to shut its services down cleanly
@@ -477,6 +485,86 @@ function ensureHuePortForward(){
    fi
    rm -f "${pidfile}"
    echo "Warning: could not bind localhost:${port} for Hue. Try: kubectl port-forward svc/hue -n llap ${port}:8888" >&2
+   return 1
+}
+function llapDaemonPortForwardPidFile(){
+   echo "$(hiveCtlStateDir)/llap-daemon-portforward.pid"
+}
+function llapDaemonLocalPort(){
+   echo "${HIVECTL_LLAP_DAEMON_LOCAL_PORT:-15002}"
+}
+function stopLlapDaemonPortForward(){
+   local pidfile=""
+   local pid=""
+
+   pidfile="$(llapDaemonPortForwardPidFile)"
+   [ -f "${pidfile}" ] || return 0
+   pid="$(cat "${pidfile}")"
+   if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+   fi
+   rm -f "${pidfile}"
+}
+# Expose llapdaemon-0 web UI on localhost:15002 (HIVECTL_LLAP_DAEMON_PORT_FORWARD=0 to disable).
+function ensureLlapDaemonPortForward(){
+   local namespace="llap"
+   local port=""
+   local mode=""
+   local pidfile=""
+   local pid=""
+   local code=""
+
+   mode="${HIVECTL_LLAP_DAEMON_PORT_FORWARD:-auto}"
+   case "${mode}" in
+      0|false|no|off|disable|disabled)
+         echo "LLAP daemon UI port-forward disabled (HIVECTL_LLAP_DAEMON_PORT_FORWARD=${mode})"
+         return 0
+         ;;
+   esac
+
+   if ! kubectl get pod llapdaemon-0 -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   port="$(llapDaemonLocalPort)"
+   pidfile="$(llapDaemonPortForwardPidFile)"
+   mkdir -p "$(hiveCtlStateDir)"
+
+   if [ -f "${pidfile}" ]; then
+      pid="$(cat "${pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         echo "LLAP daemon UI: http://localhost:${port}/ (llapdaemon-0 port-forward pid ${pid})"
+         return 0
+      fi
+      rm -f "${pidfile}"
+   fi
+
+   if command -v curl >/dev/null 2>&1; then
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/" --connect-timeout 2 2>/dev/null || echo 000)"
+      case "${code}" in
+         200|301|302|303|401|403|404)
+            echo "LLAP daemon UI: http://localhost:${port}/ (already reachable; not starting port-forward)"
+            return 0
+            ;;
+      esac
+   fi
+
+   if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"${port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "LLAP daemon UI: http://localhost:${port}/ (port ${port} in use — manual port-forward?)"
+      return 0
+   fi
+
+   nohup kubectl port-forward "pod/llapdaemon-0" -n "${namespace}" "${port}:15002" >/dev/null 2>&1 &
+   pid=$!
+   echo "${pid}" > "${pidfile}"
+   sleep 1
+   if kill -0 "${pid}" 2>/dev/null; then
+      echo "LLAP daemon UI: http://localhost:${port}/ (llapdaemon-0; pid ${pid}; stops on './hiveCtl.sh stop llap llapdaemon' or 'stop llap')"
+      return 0
+   fi
+   rm -f "${pidfile}"
+   echo "Warning: could not bind localhost:${port} for LLAP daemon UI. Try: kubectl port-forward pod/llapdaemon-0 -n llap ${port}:15002" >&2
    return 1
 }
 # Summarize node CPU arch for llap (Hive pods auto-tune hive.llap.io.enabled at bootstrap).

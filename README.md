@@ -25,7 +25,8 @@ The manifests intentionally complete the images at pod startup by installing sma
 ## Contents
 
 - [Images by profile](#images-by-profile)
-- [**Access Hue (llap)**](#access-hue-llap-profile) — SQL UI URLs after `./hiveCtl.sh start llap`
+- [**Access Hue (llap)**](#access-hue-llap-profile) — **http://localhost:8888**
+- [**Access LLAP daemon UI (llap)**](#access-llap-daemon-ui-llap-profile) — **http://localhost:15002**
 - [KIND cluster for `llap`](#kind-cluster-for-llap)
 - [Profiles](#profiles) — `standalone`, `mini`, [`llap`](#llap)
 - [Data Safety](#data-safety)
@@ -94,6 +95,43 @@ kubectl port-forward svc/hue -n llap 8888:8888
 First visit: complete Hue’s setup wizard, then use the **Hive** interpreter (user **`hive`**, password **`beeline-password`** in Secret `hive-credentials`).
 
 More detail: **[`llap` profile → Hue](#hue-llap-sql-ui)**.
+
+## Access LLAP daemon UI (llap profile)
+
+Each **`llapdaemon`** pod exposes a web UI on port **15002** (executors, cache, metrics). This lab runs **two** daemons (`llapdaemon-0`, `llapdaemon-1`); **`hiveCtl.sh` forwards `llapdaemon-0` only** to the host.
+
+### Default: open **http://localhost:15002** after start
+
+```bash
+./hiveCtl.sh start llap
+# After llapdaemon StatefulSet is Ready, hiveCtl prints: LLAP daemon UI: http://localhost:15002/ ...
+```
+
+Or start daemons alone:
+
+```bash
+./hiveCtl.sh start llap llapdaemon
+```
+
+**Automatic exposure** (same idea as Hue):
+
+1. Rollout waits for **`llapdaemon`** pods to become Ready.
+2. If **http://localhost:15002** already responds, **`hiveCtl.sh` does not** start a second listener.
+3. Otherwise it runs **`kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002`** in the background (pid under **`.hivectl/llap-daemon-portforward.pid`**). **`./hiveCtl.sh stop llap llapdaemon`** or **`stop llap`** stops it.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `HIVECTL_LLAP_DAEMON_PORT_FORWARD` | `auto` | Set to **`0`** to disable auto port-forward |
+| `HIVECTL_LLAP_DAEMON_LOCAL_PORT` | `15002` | Local URL port |
+
+Manual port-forward (second daemon or if auto mode failed):
+
+```bash
+kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
+kubectl port-forward pod/llapdaemon-1 -n llap 15003:15002   # example: second UI on another local port
+```
+
+There is **no** kind `extraPortMappings` entry for **15002** (unlike Hue **8888**); port-forward (or your own NodePort patch) is required unless **`hiveCtl.sh`** starts it for you.
 
 ## Hardware Requirements
 
@@ -413,11 +451,7 @@ beeline -e "EXPLAIN SELECT count(*) FROM managed_3_1;"
 beeline -e "SELECT count(*) FROM managed_3_1;"
 ```
 
-Open an LLAP daemon web UI at <http://localhost:15002>:
-
-```bash
-kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
-```
+**LLAP daemon UI:** **http://localhost:15002** after start — see **[Access LLAP daemon UI (llap profile)](#access-llap-daemon-ui-llap-profile)** (`hiveCtl` port-forwards **`llapdaemon-0`**).
 
 ### Hue (llap SQL UI)
 
@@ -624,6 +658,15 @@ LLAP Hue — see **[Access Hue (llap profile)](#access-hue-llap-profile)**:
 kubectl get pods,svc -n llap -l app=hue
 kubectl wait --for=condition=ready pod -l app=hue -n llap --timeout=300s
 # → http://localhost:8888 (kind template or port-forward)
+```
+
+LLAP daemon UI — see **[Access LLAP daemon UI](#access-llap-daemon-ui-llap-profile)**:
+
+```bash
+kubectl get pods -n llap -l app=llapdaemon
+kubectl wait --for=condition=ready pod/llapdaemon-0 -n llap --timeout=300s
+# → http://localhost:15002 (hiveCtl port-forward after start llap llapdaemon)
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:15002/
 ```
 
 ## Validation
