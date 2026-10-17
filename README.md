@@ -7,7 +7,7 @@ j.martinez.poblete@gmail.com
 
 ## Usage Notice
 
-This project is not meant for commercial use without permission and proper credit.
+This project is not meant for commercial use without permission and proper credit. The same notice appears at the top of every source file in this repository (shell scripts, YAML manifests, XML config, and `kind` templates).
 
 This project runs Apache Hive on Kubernetes using upstream/minimal container images from Docker Hub (`apache/hive`). Image tags differ by profile; see **Images by profile** below.
 

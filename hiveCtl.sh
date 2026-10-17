@@ -1,4 +1,5 @@
 #!/bin/bash
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
 #
 # This script should live at the root of the project
 # Assumptions:
