@@ -1,5 +1,6 @@
 #!/bin/bash
 # Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
 #
 # Archive Hive process logs (and optional Tez local paths) to HDFS for llap.
 # Used by HiveServer2 and LLAP daemons when HIVE_LOG_HDFS_BASE is set.

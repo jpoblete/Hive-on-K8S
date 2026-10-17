@@ -1,5 +1,6 @@
 #!/bin/bash
 # Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
 #
 # Script to create a Hive table with fake data.
 #
