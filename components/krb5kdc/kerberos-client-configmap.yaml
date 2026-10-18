@@ -1,0 +1,33 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Client krb5.conf for Hadoop/Hive pods in secure (KDC Service krb5kdc.secure.svc).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kerberos-client
+  namespace: default
+  labels:
+    app: krb5kdc
+data:
+  krb5.conf: |
+    [libdefaults]
+        default_realm = SECURE.LAB
+        dns_lookup_kdc = true
+        dns_lookup_realm = false
+        rdns = false
+        ticket_lifetime = 24h
+        forwardable = true
+        udp_preference_limit = 1
+
+    [realms]
+        SECURE.LAB = {
+            kdc = krb5kdc.secure.svc.cluster.local:88
+            admin_server = krb5kdc.secure.svc.cluster.local:749
+            default_domain = secure.lab
+        }
+
+    [domain_realm]
+        .secure.svc.cluster.local = SECURE.LAB
+        secure.svc.cluster.local = SECURE.LAB
+        .secure.lab = SECURE.LAB
+        secure.lab = SECURE.LAB

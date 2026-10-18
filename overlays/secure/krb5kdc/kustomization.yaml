@@ -1,0 +1,43 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - ../../../components/krb5kdc
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: StatefulSet
+      name: krb5kdc
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: ConfigMap
+      name: krb5kdc-setup
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: Service
+      name: krb5kdc
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: Service
+      name: krb5kdc-headless
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: ConfigMap
+      name: kerberos-client

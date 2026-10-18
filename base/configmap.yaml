@@ -291,11 +291,21 @@ data:
        #
        # Installing OS packages
        #
-       retry 5 10 microdnf -y install less vi vim lsof openssh-server openssh-clients sshpass hostname bind-utils iputils nmap-ncat || return 1
+       retry 5 10 microdnf -y install less vi vim lsof openssh-server openssh-clients sshpass hostname bind-utils iputils nmap-ncat krb5-workstation || return 1
        retry 5 10 rpm -ivh https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-j-26.7.0-1.el9.noarch.rpm || return 1
        echo "root:${ROOT_PASSWORD}" | chpasswd
        echo "hive:${HIVE_PASSWORD}" | chpasswd
        ensureSupergroupLabUsers
+       POD="${POD_NAME:-$(hostname -s)}"
+       mkdir -p /home/hive /home/admin
+       if [ -f "/var/kerberos/incoming/${POD}.keytab" ]; then
+          install -o hive -g hive -m 400 "/var/kerberos/incoming/${POD}.keytab" /home/hive/host-service.keytab
+       elif [ -f /var/kerberos/incoming/hive.keytab ]; then
+          install -o hive -g hive -m 400 /var/kerberos/incoming/hive.keytab /home/hive/host-service.keytab
+       fi
+       if [ -f /var/kerberos/incoming/admin.keytab ]; then
+          install -o admin -g admin -m 400 /var/kerberos/incoming/admin.keytab /home/admin/admin-service.keytab
+       fi
        usermod -s /bin/bash hive
        ssh-keygen -A
        exec /usr/sbin/sshd -D &
@@ -354,6 +364,15 @@ data:
        [ -z "${JAVA_HOME}"   ] && export JAVA_HOME=/opt/java/openjdk
        [ -z "${HADOOP_HOME}" ] && export HADOOP_HOME=/opt/hadoop
        cd "${HIVE_HOME}" || exit 1
+       function kinitHiveServiceIfNeeded(){
+          [ "${HIVE_KERBEROS:-0}" = "1" ] || return 0
+          local fqdn realm
+          fqdn="$(hostname -f)"
+          realm="${KRB5_REALM:-SECURE.LAB}"
+          [ -f /home/hive/host-service.keytab ] || { echo "missing /home/hive/host-service.keytab"; return 1; }
+          kinit -kt /home/hive/host-service.keytab "hive/${fqdn}@${realm}"
+       }
+       kinitHiveServiceIfNeeded || exit 1
        [ ! -d "${HIVE_HOME}/.local/bin" ] && mkdir -p "${HIVE_HOME}/.local/bin"
        env | awk '/_PORT/ && /=tcp:\/\// {gsub(/tcp:\/\/.*:/,"");print $0}' | while IFS= read -r i; do
            echo "Correcting: ${i}"
@@ -426,7 +445,7 @@ data:
     #
     if [ "$(whoami)" == "root" ]; then
        /opt/hive/setup/staging.sh || exit 1
-       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; /opt/hive/setup/start-hive.sh" - hive
+       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_KERBEROS=${HIVE_KERBEROS:-0}; export KRB5_REALM=${KRB5_REALM:-}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; /opt/hive/setup/start-hive.sh" - hive
     else
        startHive
     fi

@@ -1,0 +1,16 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-hdfs-nn
+  namespace: secure
+  labels:
+    app: hadoop-namenode
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

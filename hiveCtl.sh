@@ -21,7 +21,7 @@ set -o pipefail
 #
 # Print command usage and supported actions.
 function help(){
-   echo "Usage:  hiveCtl [available|start|stop|status|restart|backup|restore|cleanup] <overlay> [<component>]"
+   echo "Usage:  hiveCtl [available|start|stop|status|restart|backup|restore|cleanup|disk] <overlay> [<component>]"
    echo "        hiveCtl available"
    echo "        hiveCtl start   <overlay>"
    echo "        hiveCtl stop    <overlay>"
@@ -32,13 +32,19 @@ function help(){
    echo "        hiveCtl backup  <overlay> [<backup-dir>]"
    echo "        hiveCtl restore <overlay> <backup-dir>"
    echo "        hiveCtl cleanup <overlay>"
+   echo "        hiveCtl disk   (check Kind node /var space; prune container images if low)"
    echo "        hiveCtl status"
    echo ""
    echo "Hue (llap): after start, hiveCtl tries http://localhost:8888 automatically"
    echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
-   echo "  Disable: HIVECTL_HUE_PORT_FORWARD=0   Other port: HIVECTL_HUE_LOCAL_PORT=8888"
+   echo "  While hue-0 is Ready, a background monitor restarts port-forward every minute if localhost stops responding"
+   echo "  Disable forward: HIVECTL_HUE_PORT_FORWARD=0   Port: HIVECTL_HUE_LOCAL_PORT=8888"
+   echo "  Disable monitor: HIVECTL_HUE_PORT_FORWARD_MONITOR=0   Interval: HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL=60"
    echo "LLAP daemon UI: http://localhost:15002 after start llapdaemon (pod llapdaemon-0)"
    echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
+   echo "Profile secure: 3 DataNodes + Hue (./hiveCtl.sh start secure); Kerberos planned later"
+   echo "Disk: before start/restore, hiveCtl checks Kind /var on all nodes (mini, llap, secure, standalone)"
+   echo "  Prune when use exceeds threshold: HIVECTL_DISK_MAX_USE_PERCENT=90 (HIVECTL_DISK_CHECK=0 to skip)"
 }
 # Print the names of the objects kubectl get selects, nothing when there are none.
 # A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.
@@ -105,6 +111,8 @@ function ensureSecrets(){
    local hue_mysql_password=""
    local hue_secret_key=""
    local admin_password=""
+   local krb5_master_password=""
+   local krb5_kadmin_password=""
    local names=""
 
    ensureNamespace "${namespace}" || return 1
@@ -122,6 +130,8 @@ function ensureSecrets(){
    hue_mysql_password="$(generatePassword)"
    hue_secret_key="$(generatePassword)"
    admin_password="admin"
+   krb5_master_password="$(generatePassword)"
+   krb5_kadmin_password="$(generatePassword)"
 
    # Existing mini PVCs were initialized with the historical lab passwords.
    # Preserve compatibility so adding Secrets does not break a running metastore.
@@ -137,16 +147,104 @@ function ensureSecrets(){
       fi
    fi
 
-   kubectl create secret generic hive-credentials -n "${namespace}" \
-      --from-literal=root-password="${root_password}" \
-      --from-literal=hive-password="${hive_password}" \
-      --from-literal=hadoop-password="${hadoop_password}" \
-      --from-literal=mysql-root-password="${mysql_root_password}" \
-      --from-literal=hive-metastore-password="${hive_metastore_password}" \
-      --from-literal=beeline-password="${beeline_password}" \
-      --from-literal=hue-mysql-password="${hue_mysql_password}" \
-      --from-literal=hue-secret-key="${hue_secret_key}" \
-      --from-literal=admin-password="${admin_password}" >/dev/null
+   if [ "${namespace}" = "secure" ]; then
+      kubectl create secret generic hive-credentials -n "${namespace}" \
+         --from-literal=root-password="${root_password}" \
+         --from-literal=hive-password="${hive_password}" \
+         --from-literal=hadoop-password="${hadoop_password}" \
+         --from-literal=mysql-root-password="${mysql_root_password}" \
+         --from-literal=hive-metastore-password="${hive_metastore_password}" \
+         --from-literal=beeline-password="${beeline_password}" \
+         --from-literal=hue-mysql-password="${hue_mysql_password}" \
+         --from-literal=hue-secret-key="${hue_secret_key}" \
+         --from-literal=admin-password="${admin_password}" \
+         --from-literal=krb5-master-password="${krb5_master_password}" \
+         --from-literal=krb5-kadmin-password="${krb5_kadmin_password}" >/dev/null
+   else
+      kubectl create secret generic hive-credentials -n "${namespace}" \
+         --from-literal=root-password="${root_password}" \
+         --from-literal=hive-password="${hive_password}" \
+         --from-literal=hadoop-password="${hadoop_password}" \
+         --from-literal=mysql-root-password="${mysql_root_password}" \
+         --from-literal=hive-metastore-password="${hive_metastore_password}" \
+         --from-literal=beeline-password="${beeline_password}" \
+         --from-literal=hue-mysql-password="${hue_mysql_password}" \
+         --from-literal=hue-secret-key="${hue_secret_key}" \
+         --from-literal=admin-password="${admin_password}" >/dev/null
+   fi
+}
+# Add MIT KDC credentials to an existing secure secret (clusters created before krb5kdc).
+function ensureKrb5Secrets(){
+   local namespace="$1"
+   local krb5_master_password=""
+   local krb5_kadmin_password=""
+   local existing=""
+
+   [ "${namespace}" = "secure" ] || return 0
+   ensureSecrets "${namespace}" || return 1
+   existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.krb5-master-password}' 2>/dev/null)" || return 1
+   if [ -n "${existing}" ]; then
+      return 0
+   fi
+   krb5_master_password="$(generatePassword)"
+   krb5_kadmin_password="$(generatePassword)"
+   kubectl patch secret hive-credentials -n "${namespace}" --type merge \
+      -p "{\"stringData\":{\"krb5-master-password\":\"${krb5_master_password}\",\"krb5-kadmin-password\":\"${krb5_kadmin_password}\"}}" >/dev/null
+}
+# Wait until the KDC pod has written lab keytabs to its PVC.
+function waitForLabKeytabs(){
+   local namespace="$1"
+   local attempt=0
+
+   while [ "${attempt}" -lt 60 ]; do
+      if kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-keytabs-hadoop-hive-admin 2>/dev/null; then
+         return 0
+      fi
+      attempt=$((attempt + 1))
+      sleep 5
+   done
+   echo "Timed out waiting for lab keytabs on krb5kdc in namespace '${namespace}'"
+   return 1
+}
+# Copy lab keytabs from the KDC PVC into Secret kerberos-keytabs for pod mounts.
+function ensureKerberosKeytabSecret(){
+   local namespace="$1"
+   local tmpdir=""
+   local keytab_list=""
+   local keytab_file=""
+   local create_args=()
+
+   [ "${namespace}" = "secure" ] || return 0
+   if kubectl get secret kerberos-keytabs -n "${namespace}" >/dev/null 2>&1; then
+      if [ -n "$(kubectl get secret kerberos-keytabs -n "${namespace}" -o jsonpath='{.data.hadoop-namenode-0\.keytab}' 2>/dev/null)" ] \
+         && [ -z "${HIVECTL_KRB5_RESYNC_KEYTABS:-}" ]; then
+         return 0
+      fi
+   fi
+   waitForReady "${namespace}" "krb5kdc" || return 1
+   waitForLabKeytabs "${namespace}" || return 1
+   if ! kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 2>/dev/null; then
+      echo "Waiting for host keytabs on krb5kdc (.lab-host-keytabs-v2) ..."
+      local attempt=0
+      while [ "${attempt}" -lt 60 ]; do
+         if kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 2>/dev/null; then
+            break
+         fi
+         attempt=$((attempt + 1))
+         sleep 5
+      done
+      kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 2>/dev/null || return 1
+   fi
+   tmpdir="$(mktemp -d)"
+   trap 'rm -rf "${tmpdir}"' RETURN
+   keytab_list="$(kubectl exec -n "${namespace}" krb5kdc-0 -- sh -c 'ls -1 /var/lib/krb5kdc/keytabs/*.keytab' 2>/dev/null)" || return 1
+   for keytab_file in ${keytab_list}; do
+      kubectl exec -n "${namespace}" krb5kdc-0 -- cat "${keytab_file}" > "${tmpdir}/$(basename "${keytab_file}")" || return 1
+      create_args+=(--from-file="$(basename "${keytab_file}")=${tmpdir}/$(basename "${keytab_file}")")
+   done
+   kubectl create secret generic kerberos-keytabs -n "${namespace}" \
+      "${create_args[@]}" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null || return 1
 }
 # Add admin-password to an existing secret (clusters created before the admin OS user).
 function ensureAdminSecrets(){
@@ -169,7 +267,7 @@ function ensureHueSecrets(){
    local hue_secret_key=""
    local existing=""
 
-   [ "${namespace}" = "llap" ] || return 0
+   case "${namespace}" in llap|secure) ;; *) return 0 ;; esac
    ensureSecrets "${namespace}" || return 1
    existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.hue-mysql-password}' 2>/dev/null)" || return 1
    if [ -n "${existing}" ]; then
@@ -281,13 +379,52 @@ function overlayActive(){
    names="$(kubectlNames deployments -n "${namespace}" --selector="app=${service}")" || return 2
    [ -n "${names}" ]
 }
+# Apply NameNode and three DataNodes together (NameNode startup waits for live DNs).
+function startSecureHadoop(){
+   local namespace="secure"
+   local nn_path="./overlays/secure/hadoop-namenode/"
+   local dn_path="./overlays/secure/hadoop-datanode/"
+
+   ensureSecrets "${namespace}" || return 1
+   ensureAdminSecrets "${namespace}" || return 1
+   ensureKerberosKeytabSecret "${namespace}" || return 1
+   echo "Starting Overlay: secure_hadoop (namenode + 3 datanodes) ..."
+   kustomize build "${nn_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f - || return 1
+   kustomize build "${dn_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f - || return 1
+   waitForReady "${namespace}" "hadoop-datanode" || return 1
+   waitForReady "${namespace}" "hadoop-namenode" || return 1
+}
+function stopSecureHadoop(){
+   local namespace="secure"
+   local resources=""
+   local resource=""
+
+   echo "Stopping Overlay: secure_hadoop (datanodes + namenode) ..."
+   for app in hadoop-datanode hadoop-namenode; do
+      resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${app}")" || return 1
+      for resource in ${resources}; do
+         kubectl delete "${resource}" -n "${namespace}" --wait=false || return 1
+      done
+      waitForStopped "${namespace}" "${app}"
+   done
+}
+function profileHasHue(){
+   case "${1:-}" in
+      llap|secure) return 0 ;;
+      *) return 1 ;;
+   esac
+}
 # Wait until every replica of a component StatefulSet or Deployment reports Ready.
 function waitForReady(){
    local namespace="$1"
    local service="$2"
 
+   local rollout_timeout="600s"
+   if [ "${service}" = "hadoop-namenode" ]; then
+      rollout_timeout="1200s"
+   fi
    if kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
-      kubectl rollout status "statefulset/${service}" -n "${namespace}" --timeout=600s
+      kubectl rollout status "statefulset/${service}" -n "${namespace}" --timeout="${rollout_timeout}"
    else
       kubectl rollout status "deployment/${service}" -n "${namespace}" --timeout=600s
    fi
@@ -329,23 +466,69 @@ function startOverlay(){
    local namespace="${target%_*}"
    local service="${target#*_}"
 
+   ensureClusterDiskSpaceOnce
+
+   if [ "${target}" = "secure_hadoop-namenode" ]; then
+      overlayActive "secure_hadoop-namenode"
+      case $? in
+         0)
+            echo "Overlay: secure_hadoop is already ACTIVE, try stopping/restarting it"
+            waitForReady "${namespace}" "hadoop-datanode"
+            waitForReady "${namespace}" "hadoop-namenode"
+            ;;
+         1) startSecureHadoop || return 1 ;;
+         *) return 1 ;;
+      esac
+      return 0
+   fi
+   if [ "${target}" = "secure_hadoop-datanode" ]; then
+      echo "Overlay: secure_hadoop-datanode is started with secure_hadoop-namenode (use: hiveCtl start secure hadoop-namenode)"
+      return 0
+   fi
+
    overlayActive "${target}"
    case $? in
       0)
          echo "Overlay: ${target} is already ACTIVE, try stopping/restarting it"
+         ensureSecrets "${namespace}" || return 1
+         ensureAdminSecrets "${namespace}" || return 1
+         if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
+            ensureKrb5Secrets "${namespace}" || return 1
+         fi
+         if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
+            ensureHueSecrets "${namespace}" || return 1
+         fi
          waitForReady "${namespace}" "${service}"
+         if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
+            ensureKerberosKeytabSecret "${namespace}" || return 1
+         fi
          ;;
       1)
          if overlayExists "${target}"; then
             echo "Starting Overlay: ${target} ..."
             ensureSecrets "${namespace}" || return 1
             ensureAdminSecrets "${namespace}" || return 1
-            if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
+            if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
+               ensureKrb5Secrets "${namespace}" || return 1
+            fi
+            if [ "${namespace}" = "secure" ]; then
+               case "${service}" in
+                  krb5kdc)
+                     ;;
+                  hadoop-namenode|hadoop-datanode|hivemetastore|hiveserver2)
+                     ensureKerberosKeytabSecret "${namespace}" || return 1
+                     ;;
+               esac
+            fi
+            if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
                ensureHueSecrets "${namespace}" || return 1
             fi
             #kubectl apply -k "${overlay_path}"
             kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
             waitForReady "${namespace}" "${service}"
+            if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
+               ensureKerberosKeytabSecret "${namespace}" || return 1
+            fi
          else
             echo "Overlay: ${target} DOES NOT EXIST"
          fi
@@ -355,8 +538,8 @@ function startOverlay(){
          ;;
    esac
 
-   if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
-      ensureHuePortForward || true
+   if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
+      ensureHuePortForward "${namespace}" || true
    fi
    if [ "${namespace}" = "llap" ] && [ "${service}" = "llapdaemon" ]; then
       ensureLlapDaemonPortForward || true
@@ -374,6 +557,15 @@ function stopOverlay(){
    local resources=""
    local resource=""
 
+   if [ "${target}" = "secure_hadoop-datanode" ]; then
+      echo "Overlay: secure_hadoop-datanode stops with secure_hadoop-namenode (use: hiveCtl stop secure hadoop-namenode)"
+      return 0
+   fi
+   if [ "${target}" = "secure_hadoop-namenode" ]; then
+      stopSecureHadoop
+      return $?
+   fi
+
    overlayActive "${target}"
    case $? in
       0) ;;
@@ -387,8 +579,8 @@ function stopOverlay(){
    esac
 
    echo "Stopping Overlay: ${target} ..."
-   if [ "${namespace}" = "llap" ] && [ "${service}" = "hue" ]; then
-      stopHuePortForward
+   if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
+      stopHuePortForward "${namespace}"
    fi
    if [ "${namespace}" = "llap" ] && [ "${service}" = "llapdaemon" ]; then
       stopLlapDaemonPortForward
@@ -407,17 +599,58 @@ function hiveCtlStateDir(){
    echo "${HIVECTL_STATE_DIR:-${root}/.hivectl}"
 }
 function huePortForwardPidFile(){
-   echo "$(hiveCtlStateDir)/llap-hue-portforward.pid"
+   local namespace="${1:-llap}"
+   echo "$(hiveCtlStateDir)/${namespace}-hue-portforward.pid"
+}
+function huePortForwardMonitorPidFile(){
+   local namespace="${1:-llap}"
+   echo "$(hiveCtlStateDir)/${namespace}-hue-portforward-monitor.pid"
 }
 function hueLocalPort(){
    echo "${HIVECTL_HUE_LOCAL_PORT:-8888}"
 }
-# Stop background kubectl port-forward started by ensureHuePortForward.
-function stopHuePortForward(){
+function huePortForwardDisabled(){
+   case "${HIVECTL_HUE_PORT_FORWARD:-auto}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function huePortForwardMonitorDisabled(){
+   case "${HIVECTL_HUE_PORT_FORWARD_MONITOR:-1}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+# True when hue-0 exists and its Ready condition is True.
+function huePodRunningAndReady(){
+   local namespace="${1:-${HIVECTL_HUE_NAMESPACE:-llap}}"
+   local phase=""
+   local ready=""
+
+   phase="$(kubectl get pod hue-0 -n "${namespace}" -o jsonpath='{.status.phase}' 2>/dev/null)" || return 1
+   [ "${phase}" = "Running" ] || return 1
+   ready="$(kubectl get pod hue-0 -n "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" || return 1
+   [ "${ready}" = "True" ] || return 1
+}
+# True when Hue responds on localhost (kind mapping or port-forward).
+function hueLocalUrlReachable(){
+   local port="$1"
+   local code=""
+
+   [ -n "${port}" ] || return 1
+   command -v curl >/dev/null 2>&1 || return 1
+   code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/" --connect-timeout 2 2>/dev/null || echo 000)"
+   case "${code}" in
+      200|301|302|303|401|403|404) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function stopHuePortForwardMonitor(){
+   local namespace="${1:-llap}"
    local pidfile=""
    local pid=""
 
-   pidfile="$(huePortForwardPidFile)"
+   pidfile="$(huePortForwardMonitorPidFile "${namespace}")"
    [ -f "${pidfile}" ] || return 0
    pid="$(cat "${pidfile}")"
    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
@@ -426,53 +659,27 @@ function stopHuePortForward(){
    fi
    rm -f "${pidfile}"
 }
-# Expose Hue on localhost after llap hue is up (skipped when HIVECTL_HUE_PORT_FORWARD=0).
-function ensureHuePortForward(){
-   local namespace="llap"
+# Start kubectl port-forward to svc/hue (replaces a stale forward when localhost is down).
+function startHuePortForwardProcess(){
+   local namespace="${1:-${HIVECTL_HUE_NAMESPACE:-llap}}"
    local port=""
-   local mode=""
    local pidfile=""
    local pid=""
-   local code=""
-
-   mode="${HIVECTL_HUE_PORT_FORWARD:-auto}"
-   case "${mode}" in
-      0|false|no|off|disable|disabled)
-         echo "Hue port-forward disabled (HIVECTL_HUE_PORT_FORWARD=${mode})"
-         return 0
-         ;;
-   esac
-
-   if ! kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
-      return 0
-   fi
 
    port="$(hueLocalPort)"
-   pidfile="$(huePortForwardPidFile)"
+   pidfile="$(huePortForwardPidFile "${namespace}")"
    mkdir -p "$(hiveCtlStateDir)"
 
    if [ -f "${pidfile}" ]; then
       pid="$(cat "${pidfile}")"
       if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-         echo "Hue UI: http://localhost:${port}/ (port-forward pid ${pid})"
-         return 0
+         if hueLocalUrlReachable "${port}"; then
+            return 0
+         fi
+         kill "${pid}" 2>/dev/null || true
+         wait "${pid}" 2>/dev/null || true
       fi
       rm -f "${pidfile}"
-   fi
-
-   if command -v curl >/dev/null 2>&1; then
-      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/" --connect-timeout 2 2>/dev/null || echo 000)"
-      case "${code}" in
-         200|301|302|303|401|403|404)
-            echo "Hue UI: http://localhost:${port}/ (already reachable; not starting port-forward)"
-            return 0
-            ;;
-      esac
-   fi
-
-   if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"${port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
-      echo "Hue UI: http://localhost:${port}/ (port ${port} in use — kind mapping or manual port-forward?)"
-      return 0
    fi
 
    nohup kubectl port-forward "svc/hue" -n "${namespace}" "${port}:8888" >/dev/null 2>&1 &
@@ -480,11 +687,140 @@ function ensureHuePortForward(){
    echo "${pid}" > "${pidfile}"
    sleep 1
    if kill -0 "${pid}" 2>/dev/null; then
-      echo "Hue UI: http://localhost:${port}/ (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop llap hue' or 'stop llap')"
       return 0
    fi
    rm -f "${pidfile}"
-   echo "Warning: could not bind localhost:${port} for Hue. Try: kubectl port-forward svc/hue -n llap ${port}:8888" >&2
+   return 1
+}
+# Internal loop: invoked via hiveCtl __hue-portforward-monitor (nohup background).
+function huePortForwardMonitorLoop(){
+   local namespace="${HIVECTL_HUE_NAMESPACE:-llap}"
+   local interval=""
+   local port=""
+
+   interval="${HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL:-60}"
+   while true; do
+      sleep "${interval}"
+      if huePortForwardDisabled; then
+         exit 0
+      fi
+      if huePortForwardMonitorDisabled; then
+         exit 0
+      fi
+      if ! kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
+         continue
+      fi
+      if ! huePodRunningAndReady "${namespace}"; then
+         continue
+      fi
+      port="$(hueLocalPort)"
+      if hueLocalUrlReachable "${port}"; then
+         continue
+      fi
+      echo "[hiveCtl] Hue http://127.0.0.1:${port}/ unreachable while hue-0 is Ready; restarting port-forward" >&2
+      if startHuePortForwardProcess "${namespace}"; then
+         echo "[hiveCtl] Hue port-forward restarted (pid $(cat "$(huePortForwardPidFile "${namespace}")" 2>/dev/null))" >&2
+      else
+         echo "[hiveCtl] Warning: could not restart Hue port-forward to localhost:${port}" >&2
+      fi
+   done
+}
+function startHuePortForwardMonitor(){
+   local namespace="${1:-llap}"
+   local monitor_pidfile=""
+   local logfile=""
+   local hivectl=""
+   local pid=""
+
+   if huePortForwardDisabled || huePortForwardMonitorDisabled; then
+      return 0
+   fi
+   if ! kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   monitor_pidfile="$(huePortForwardMonitorPidFile "${namespace}")"
+   if [ -f "${monitor_pidfile}" ]; then
+      pid="$(cat "${monitor_pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         return 0
+      fi
+      rm -f "${monitor_pidfile}"
+   fi
+
+   mkdir -p "$(hiveCtlStateDir)"
+   logfile="$(hiveCtlStateDir)/${namespace}-hue-portforward-monitor.log"
+   hivectl="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+   nohup env HIVECTL_STATE_DIR="$(hiveCtlStateDir)" \
+      HIVECTL_HUE_NAMESPACE="${namespace}" \
+      HIVECTL_HUE_LOCAL_PORT="$(hueLocalPort)" \
+      HIVECTL_HUE_PORT_FORWARD="${HIVECTL_HUE_PORT_FORWARD:-auto}" \
+      HIVECTL_HUE_PORT_FORWARD_MONITOR="${HIVECTL_HUE_PORT_FORWARD_MONITOR:-1}" \
+      HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL="${HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL:-60}" \
+      bash "${hivectl}" __hue-portforward-monitor >>"${logfile}" 2>&1 &
+   pid=$!
+   echo "${pid}" > "${monitor_pidfile}"
+}
+# Stop background kubectl port-forward and its monitor.
+function stopHuePortForward(){
+   local namespace="${1:-llap}"
+   local pidfile=""
+   local pid=""
+
+   stopHuePortForwardMonitor "${namespace}"
+   pidfile="$(huePortForwardPidFile "${namespace}")"
+   [ -f "${pidfile}" ] || return 0
+   pid="$(cat "${pidfile}")"
+   if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+   fi
+   rm -f "${pidfile}"
+}
+# Expose Hue on localhost after hue is up (skipped when HIVECTL_HUE_PORT_FORWARD=0).
+function ensureHuePortForward(){
+   local namespace="${1:-llap}"
+   local port=""
+   local pidfile=""
+   local pid=""
+
+   if huePortForwardDisabled; then
+      stopHuePortForward "${namespace}"
+      echo "Hue port-forward disabled (HIVECTL_HUE_PORT_FORWARD=${HIVECTL_HUE_PORT_FORWARD})"
+      return 0
+   fi
+
+   if ! kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   port="$(hueLocalPort)"
+   pidfile="$(huePortForwardPidFile "${namespace}")"
+   mkdir -p "$(hiveCtlStateDir)"
+
+   if hueLocalUrlReachable "${port}"; then
+      if [ -f "${pidfile}" ]; then
+         pid="$(cat "${pidfile}")"
+         if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            echo "Hue UI (${namespace}): http://localhost:${port}/ (port-forward pid ${pid})"
+         else
+            echo "Hue UI (${namespace}): http://localhost:${port}/ (already reachable; not starting port-forward)"
+         fi
+      else
+         echo "Hue UI (${namespace}): http://localhost:${port}/ (already reachable; not starting port-forward)"
+      fi
+      startHuePortForwardMonitor "${namespace}" || true
+      return 0
+   fi
+
+   if startHuePortForwardProcess "${namespace}"; then
+      pid="$(cat "${pidfile}")"
+      echo "Hue UI (${namespace}): http://localhost:${port}/ (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop ${namespace} hue')"
+      startHuePortForwardMonitor "${namespace}" || true
+      return 0
+   fi
+   echo "Warning: could not bind localhost:${port} for Hue. Try: kubectl port-forward svc/hue -n ${namespace} ${port}:8888" >&2
+   startHuePortForwardMonitor "${namespace}" || true
    return 1
 }
 function llapDaemonPortForwardPidFile(){
@@ -579,11 +915,85 @@ function llapNodeArchSummary(){
       echo "LLAP worker node architecture(s): ${archs} (hive.llap.io.enabled is set per pod via hadoop checknative in staging.sh)"
    fi
 }
+# Percent of /var used on a Kind node container (empty when unknown).
+function kindNodeVarUsePercent(){
+   local node="$1"
+
+   docker exec "${node}" df -P /var 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}'
+}
+function pruneKindNodeImages(){
+   local node="$1"
+
+   docker exec "${node}" crictl rmi --prune 2>/dev/null
+}
+function reportKindNodeDisk(){
+   local node="$1"
+   local use=""
+
+   use="$(kindNodeVarUsePercent "${node}")"
+   [ -n "${use}" ] || return 1
+   echo "${node} /var ${use}% used"
+}
+# Prune unused containerd images on Kind nodes when /var is nearly full (avoids ImagePullBackOff).
+function ensureClusterDiskSpace(){
+   local max_use=""
+   local node=""
+   local use=""
+   local use_after=""
+
+   case "${HIVECTL_DISK_CHECK:-1}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+   esac
+   command -v docker >/dev/null 2>&1 || return 0
+   kubectl get nodes >/dev/null 2>&1 || return 0
+
+   max_use="${HIVECTL_DISK_MAX_USE_PERCENT:-90}"
+
+   while read -r node; do
+      [ -n "${node}" ] || continue
+      docker inspect "${node}" >/dev/null 2>&1 || continue
+      use="$(kindNodeVarUsePercent "${node}")"
+      [ -n "${use}" ] || continue
+      if [ "${use}" -lt "${max_use}" ]; then
+         continue
+      fi
+      echo "hiveCtl: ${node} /var is ${use}% full (threshold ${max_use}%) — pruning unused container images ..."
+      pruneKindNodeImages "${node}"
+      use_after="$(kindNodeVarUsePercent "${node}")"
+      if [ -n "${use_after}" ]; then
+         echo "hiveCtl: ${node} /var now ${use_after}% used"
+      fi
+      if [ -n "${use_after}" ] && [ "${use_after}" -ge 98 ]; then
+         echo "Warning: ${node} still critically full (${use_after}%). Try: ./hiveCtl.sh disk   or increase Docker Desktop disk." >&2
+      fi
+   done < <(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+}
+function ensureClusterDiskSpaceOnce(){
+   [ "${HIVECTL_DISK_CHECKED:-0}" = "1" ] && return 0
+   HIVECTL_DISK_CHECKED=1
+   ensureClusterDiskSpace
+}
+function showClusterDisk(){
+   local node=""
+   local any=0
+
+   command -v docker >/dev/null 2>&1 || { echo "docker not available"; return 1; }
+   kubectl get nodes >/dev/null 2>&1 || { echo "kubectl cluster not reachable"; return 1; }
+   while read -r node; do
+      [ -n "${node}" ] || continue
+      docker inspect "${node}" >/dev/null 2>&1 || continue
+      reportKindNodeDisk "${node}" && any=1
+   done < <(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+   [ "${any}" -eq 1 ] || echo "No Kind node containers matched cluster node names"
+   ensureClusterDiskSpace
+}
 # Start all components in dependency order.
 function startStack(){
    local namespace="$1"
    local component=""
    local components=()
+
+   ensureClusterDiskSpaceOnce
 
    case "${namespace}" in
       standalone)
@@ -594,6 +1004,12 @@ function startStack(){
          ensureAdminSecrets "${namespace}" || return 1
          llapNodeArchSummary
          components=(hadoop mysql zookeeper hivemetastore llapdaemon hiveserver2 hue)
+         ;;
+      secure)
+         ensureKrb5Secrets "${namespace}" || return 1
+         ensureHueSecrets "${namespace}" || return 1
+         ensureAdminSecrets "${namespace}" || return 1
+         components=(krb5kdc hadoop-namenode mysql hivemetastore hiveserver2 hue)
          ;;
       *)
          components=(hadoop mysql hivemetastore hiveserver2)
@@ -618,6 +1034,9 @@ function stopStack(){
          ;;
       llap)
          components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
+         ;;
+      secure)
+         components=(hue hiveserver2 hivemetastore mysql hadoop-namenode krb5kdc)
          ;;
       *)
          components=(hiveserver2 hivemetastore mysql hadoop)
@@ -744,6 +1163,7 @@ function backupStandaloneStack(){
    fi
 
    requireNamespace "${namespace}" || return 1
+   ensureClusterDiskSpaceOnce
    mkdir -p "${backup_dir}" || return 1
    echo "Creating standalone backup in: ${backup_dir}"
    backupSecrets "${namespace}" "${backup_dir}" || return 1
@@ -796,6 +1216,8 @@ function restoreStandaloneStack(){
       echo "Backup directory must contain standalone-hive.tgz"
       return 1
    fi
+
+   ensureClusterDiskSpaceOnce
 
    restoreSecrets "${namespace}" "${backup_dir}" || return 1
    echo "Restoring standalone backup from: ${backup_dir}"
@@ -914,6 +1336,115 @@ EOF
    fi
    return "${status}"
 }
+# Pod used for offline HDFS backup/restore (mini/llap vs secure NameNode).
+function hdfsBackupPod(){
+   case "${1:-}" in
+      secure) echo "hadoop-namenode-0" ;;
+      *) echo "hadoop-0" ;;
+   esac
+}
+# Ensure HDFS storage is Ready before backup/restore.
+function ensureHdfsOverlayReady(){
+   local namespace="$1"
+
+   case "${namespace}" in
+      secure) ensureOverlayReady "${namespace}" hadoop-namenode ;;
+      *) ensureOverlayReady "${namespace}" hadoop ;;
+   esac
+}
+# Archive selected HDFS paths inside the HDFS admin pod.
+function hdfsArchiveForBackup(){
+   local namespace="$1"
+   local pod
+   pod="$(hdfsBackupPod "${namespace}")"
+
+   if [ "${namespace}" = "secure" ]; then
+      # shellcheck disable=SC2016
+      kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
+         realm="${KRB5_REALM:-SECURE.LAB}"
+         host="$(hostname -f)"
+         sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/${host}@${realm}" || exit 1
+         rm -rf /tmp/hdfs-backup /tmp/hdfs-backup.tgz
+         mkdir -p /tmp/hdfs-backup
+         for path in /opt /tmp /user /users /warehouse; do
+            if hdfs dfs -test -e "${path}"; then
+               hdfs dfs -get "${path}" /tmp/hdfs-backup/
+            fi
+         done
+         tar -C /tmp -czf /tmp/hdfs-backup.tgz hdfs-backup
+      '
+   else
+      # shellcheck disable=SC2016
+      kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
+         rm -rf /tmp/hdfs-backup /tmp/hdfs-backup.tgz
+         mkdir -p /tmp/hdfs-backup
+         for path in /opt /tmp /user /users /warehouse; do
+            if hdfs dfs -test -e "${path}"; then
+               hdfs dfs -get "${path}" /tmp/hdfs-backup/
+            fi
+         done
+         tar -C /tmp -czf /tmp/hdfs-backup.tgz hdfs-backup
+      '
+   fi
+}
+# Restore HDFS paths from an archive inside the HDFS admin pod.
+function hdfsRestoreFromArchive(){
+   local namespace="$1"
+   local pod
+   pod="$(hdfsBackupPod "${namespace}")"
+
+   if [ "${namespace}" = "secure" ]; then
+      # shellcheck disable=SC2016
+      kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
+         realm="${KRB5_REALM:-SECURE.LAB}"
+         host="$(hostname -f)"
+         sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/${host}@${realm}" || exit 1
+         rm -rf /tmp/hdfs-restore
+         mkdir -p /tmp/hdfs-restore
+         tar -C /tmp/hdfs-restore -xzf /tmp/hdfs-backup.tgz
+         for path in /opt /tmp /user /users /warehouse; do
+            hdfs dfs -rm -r -skipTrash "${path}" >/dev/null 2>&1 || true
+         done
+         for path in /tmp/hdfs-restore/hdfs-backup/*; do
+            hdfs dfs -put "${path}" /
+         done
+         hdfs dfs -mkdir -p /tmp/hive /user/hive /user/admin /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+         hdfs dfs -chmod 777 / /tmp
+         hdfs dfs -chmod -R 777 /tmp/hive
+         hdfs dfs -chown -R hive:supergroup /tmp/hive /user/hive /warehouse /opt || true
+         hdfs dfs -chown admin:supergroup /user/admin 2>/dev/null || true
+      '
+   else
+      # shellcheck disable=SC2016
+      kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
+         rm -rf /tmp/hdfs-restore
+         mkdir -p /tmp/hdfs-restore
+         tar -C /tmp/hdfs-restore -xzf /tmp/hdfs-backup.tgz
+         for path in /opt /tmp /user /users /warehouse; do
+            hdfs dfs -rm -r -skipTrash "${path}" >/dev/null 2>&1 || true
+         done
+         for path in /tmp/hdfs-restore/hdfs-backup/*; do
+            hdfs dfs -put "${path}" /
+         done
+         hdfs dfs -mkdir -p /tmp/hive /user/hive /user/admin /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+         hdfs dfs -chmod 777 / /tmp
+         hdfs dfs -chmod -R 777 /tmp/hive
+         hdfs dfs -chown -R hive:supergroup /tmp/hive /user/hive /warehouse /opt || true
+         hdfs dfs -chown admin:supergroup /user/admin 2>/dev/null || true
+      '
+   fi
+}
+# PVC names removed by cleanupStack for a profile.
+function stackCleanupPvcs(){
+   case "${1:-}" in
+      secure)
+         echo "mysql-mysql-0 pvc-hdfs-nn datanode-data-hadoop-datanode-0 datanode-data-hadoop-datanode-1 datanode-data-hadoop-datanode-2 krb5kdc-data-krb5kdc-0"
+         ;;
+      *)
+         echo "mysql-mysql-0 pvc-hdfs"
+         ;;
+   esac
+}
 # Back up MySQL metastore data and HDFS data to a local directory.
 function backupStack(){
    local namespace="$1"
@@ -933,13 +1464,15 @@ function backupStack(){
 
    requireNamespace "${namespace}" || return 1
 
+   ensureClusterDiskSpaceOnce
+
    mkdir -p "${backup_dir}" || return 1
    echo "Creating backup in: ${backup_dir}"
    backupSecrets "${namespace}" "${backup_dir}" || return 1
 
    stopHiveWriters "${namespace}" stopped_hms stopped_hs2 || return 1
 
-   ensureOverlayReady "${namespace}" hadoop || status=1
+   ensureHdfsOverlayReady "${namespace}" || status=1
    ensureOverlayReady "${namespace}" mysql || status=1
 
    if [ "${status}" -eq 0 ]; then
@@ -952,21 +1485,13 @@ function backupStack(){
 
    if [ "${status}" -eq 0 ]; then
       echo "Backing up HDFS data ..."
-      # shellcheck disable=SC2016
-      kubectl exec hadoop-0 -n "${namespace}" -- bash -lc '
-         rm -rf /tmp/hdfs-backup /tmp/hdfs-backup.tgz
-         mkdir -p /tmp/hdfs-backup
-         for path in /opt /tmp /users /warehouse; do
-            if hdfs dfs -test -e "${path}"; then
-               hdfs dfs -get "${path}" /tmp/hdfs-backup/
-            fi
-         done
-         tar -C /tmp -czf /tmp/hdfs-backup.tgz hdfs-backup
-      ' || status=1
+      hdfsArchiveForBackup "${namespace}" || status=1
    fi
 
    if [ "${status}" -eq 0 ]; then
-      kubectl cp "${namespace}/hadoop-0:/tmp/hdfs-backup.tgz" "${backup_dir}/hdfs-backup.tgz" || status=1
+      local hdfs_pod
+      hdfs_pod="$(hdfsBackupPod "${namespace}")"
+      kubectl cp "${namespace}/${hdfs_pod}:/tmp/hdfs-backup.tgz" "${backup_dir}/hdfs-backup.tgz" || status=1
    fi
 
    restartHiveWriters "${namespace}" "${stopped_hms}" "${stopped_hs2}" || status=1
@@ -1002,6 +1527,8 @@ function restoreStack(){
       return 1
    fi
 
+   ensureClusterDiskSpaceOnce
+
    restoreSecrets "${namespace}" "${backup_dir}" || return 1
 
    echo "Restoring backup from: ${backup_dir}"
@@ -1009,10 +1536,20 @@ function restoreStack(){
 
    # Storage that isn't running is started now and the rest of the stack after the restore,
    # so on a fresh namespace the Metastore never creates an empty schema first
-   for component in hadoop mysql; do
+   local storage_components=()
+   case "${namespace}" in
+      secure) storage_components=(krb5kdc hadoop-namenode mysql) ;;
+      *) storage_components=(hadoop mysql) ;;
+   esac
+   for component in "${storage_components[@]}"; do
       overlayActive "${namespace}_${component}"
       case $? in
-         0) waitForReady "${namespace}" "${component}" || status=1 ;;
+         0)
+            if [ "${component}" = "hadoop-namenode" ]; then
+               waitForReady "${namespace}" "hadoop-datanode" || status=1
+            fi
+            waitForReady "${namespace}" "${component}" || status=1
+            ;;
          1)
             startOverlay "${namespace}_${component}" || status=1
             started_storage=1
@@ -1031,27 +1568,13 @@ function restoreStack(){
 
    if [ "${status}" -eq 0 ]; then
       echo "Restoring HDFS data ..."
-      kubectl cp "${backup_dir}/hdfs-backup.tgz" "${namespace}/hadoop-0:/tmp/hdfs-backup.tgz" || status=1
+      local hdfs_pod
+      hdfs_pod="$(hdfsBackupPod "${namespace}")"
+      kubectl cp "${backup_dir}/hdfs-backup.tgz" "${namespace}/${hdfs_pod}:/tmp/hdfs-backup.tgz" || status=1
    fi
 
    if [ "${status}" -eq 0 ]; then
-      # shellcheck disable=SC2016
-      kubectl exec hadoop-0 -n "${namespace}" -- bash -lc '
-         rm -rf /tmp/hdfs-restore
-         mkdir -p /tmp/hdfs-restore
-         tar -C /tmp/hdfs-restore -xzf /tmp/hdfs-backup.tgz
-         for path in /opt /tmp /users /warehouse; do
-            hdfs dfs -rm -r -skipTrash "${path}" >/dev/null 2>&1 || true
-         done
-         for path in /tmp/hdfs-restore/hdfs-backup/*; do
-            hdfs dfs -put "${path}" /
-         done
-         hdfs dfs -mkdir -p /tmp/hive /users/hive /users/admin /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
-         hdfs dfs -chmod 777 / /tmp
-         hdfs dfs -chmod -R 777 /tmp/hive
-         hdfs dfs -chown -R hive:supergroup /tmp/hive /users/hive /warehouse /opt || true
-         hdfs dfs -chown admin:supergroup /users/admin 2>/dev/null || true
-      ' || status=1
+      hdfsRestoreFromArchive "${namespace}" || status=1
    fi
 
    if [ "${started_storage}" = "0" ]; then
@@ -1083,12 +1606,14 @@ function cleanupStack(){
 
    requireNamespace "${namespace}" || return 1
 
+   local pvc_list
+   pvc_list="$(stackCleanupPvcs "${namespace}")"
+
    cat <<EOF
 WARNING: cleanup will delete PVCs for namespace '${namespace}'.
 
 This removes Kubernetes' bindings for:
-  - mysql-mysql-0
-  - pvc-hdfs
+$(for pvc in ${pvc_list}; do echo "  - ${pvc}"; done)
 
 If these PVCs/PVs are cleared, Hive metastore and HDFS data can be lost.
 EOF
@@ -1116,13 +1641,17 @@ EOF
 
    pv_names="$(
       kubectl get pv --no-headers -o custom-columns=NAME:.metadata.name,CLAIM:.spec.claimRef.name,NAMESPACE:.spec.claimRef.namespace \
-      | awk -v namespace="${namespace}" '($2 == "mysql-mysql-0" || $2 == "pvc-hdfs") && $3 == namespace {print $1}'
+      | awk -v namespace="${namespace}" -v pvcs="${pvc_list}" '
+         BEGIN { n = split(pvcs, a, " "); for (i = 1; i <= n; i++) wanted[a[i]] = 1 }
+         wanted[$2] && $3 == namespace { print $1 }
+      '
    )" || return 1
 
    stopStack "${namespace}" || return 1
 
    echo "Deleting PVCs ..."
-   kubectl delete pvc mysql-mysql-0 pvc-hdfs -n "${namespace}" --ignore-not-found || status=1
+   # shellcheck disable=SC2086
+   kubectl delete pvc ${pvc_list} -n "${namespace}" --ignore-not-found || status=1
 
    if [ -n "${pv_names}" ]; then
       echo "Deleting matching PV objects ..."
@@ -1131,7 +1660,11 @@ EOF
       done
    fi
 
-   waitForDeleted 180 pvc/mysql-mysql-0 pvc/pvc-hdfs -n "${namespace}" || status=1
+   local wait_args=()
+   for pvc in ${pvc_list}; do
+      wait_args+=( "pvc/${pvc}" )
+   done
+   waitForDeleted 180 "${wait_args[@]}" -n "${namespace}" || status=1
 
    echo "Deleting namespace '${namespace}' ..."
    kubectl delete namespace "${namespace}" --ignore-not-found || status=1
@@ -1148,6 +1681,9 @@ EOF
 # Dispatch CLI actions to the appropriate helper.
 main(){
    case "${1:-}" in
+        __hue-portforward-monitor)
+          huePortForwardMonitorLoop
+          ;;
         available)
           overlays
           ;;
@@ -1169,6 +1705,9 @@ main(){
           ;;
         status)
           activeOverlays show
+          ;;
+        disk)
+          showClusterDisk
           ;;
         restart)
           [[ -z "${2:-}" ]] && help && exit 1

@@ -1,0 +1,23 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: Service
+metadata:
+  name: nameservice
+  namespace: default
+  labels:
+    app: hadoop-namenode
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: hadoop-namenode
+  ports:
+    - port: 8020
+      targetPort: 8020
+      name: rpc
+      protocol: TCP
+    - port: 9870
+      targetPort: 9870
+      name: http
+      protocol: TCP

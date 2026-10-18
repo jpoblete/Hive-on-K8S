@@ -1,0 +1,238 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hadoop-namenode-setup
+  namespace: default
+  labels:
+    app: hadoop-namenode
+data:
+  core-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>fs.defaultFS</name>
+          <value>hdfs://nameservice:8020</value>
+       </property>
+       <property>
+          <name>hadoop.proxyuser.hive.hosts</name>
+          <value>*</value>
+       </property>
+       <property>
+          <name>hadoop.proxyuser.hive.groups</name>
+          <value>*</value>
+       </property>
+       <property>
+          <name>dfs.client.use.datanode.hostname</name>
+          <value>true</value>
+       </property>
+    </configuration>
+
+  hdfs-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>dfs.replication</name>
+          <value>3</value>
+       </property>
+       <property>
+          <name>dfs.namenode.rpc-bind-host</name>
+          <value>0.0.0.0</value>
+       </property>
+       <property>
+          <name>dfs.namenode.http-bind-host</name>
+          <value>0.0.0.0</value>
+       </property>
+       <property>
+          <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
+          <value>false</value>
+       </property>
+       <property>
+          <name>hadoop.tmp.dir</name>
+          <value>/hdfs</value>
+       </property>
+       <property>
+          <name>dfs.namenode.name.dir</name>
+          <value>file:///hdfs/dfs/name</value>
+       </property>
+       <property>
+          <name>dfs.namenode.audit.log.debug.cmdlist</name>
+          <value>getfileinfo,listStatus</value>
+       </property>
+    </configuration>
+
+  mapred-site.xml: |
+    <?xml version="1.0"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>mapred.job.tracker</name>
+          <value>nameservice:9001</value>
+       </property>
+    </configuration>
+
+  hadoop-env.sh: |
+    export JAVA_HOME=/usr/lib/jvm/jre
+    export HADOOP_HOME=/opt/hadoop
+    export HADOOP_HEAPSIZE=1024m
+    export HADOOP_LOG_DIR=/hdfs/logs
+
+  centos-vault.repo: |
+    [vault-base]
+    name=CentOS 7.9.2009 - Base (vault)
+    baseurl=https://vault.centos.org/7.9.2009/os/$basearch/
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+    enabled=0
+    [vault-updates]
+    name=CentOS 7.9.2009 - Updates (vault)
+    baseurl=https://vault.centos.org/7.9.2009/updates/$basearch/
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+    enabled=0
+    [vault-extras]
+    name=CentOS 7.9.2009 - Extras (vault)
+    baseurl=https://vault.centos.org/7.9.2009/extras/$basearch/
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+    enabled=0
+
+  root-tasks.sh: |
+    #!/bin/bash
+    function retry(){
+     local attempts="$1" delay="$2" attempt=1
+     shift 2
+     until "$@"; do
+      if [ "${attempt}" -ge "${attempts}" ]; then return 1; fi
+      sleep "${delay}"
+      attempt=$((attempt + 1))
+     done
+    }
+    function installPackages(){
+     local packages="less vi vim lsof openssh-server openssh-clients sshpass hostname bind-utils iputils nmap-ncat krb5-workstation"
+     local cache=/hdfs/rpm-cache
+     if [ "$(cat "${cache}/packages.list" 2>/dev/null)" = "${packages}" ] &&
+        yum -y --disablerepo='*' localinstall "${cache}"/*.rpm; then return 0; fi
+     rm -rf "${cache}"; mkdir -p "${cache}"
+     yum -y --disablerepo='*' --enablerepo='vault-*' --downloadonly --downloaddir="${cache}" install ${packages} &&
+      yum -y --disablerepo='*' localinstall "${cache}"/*.rpm &&
+      echo "${packages}" > "${cache}/packages.list"
+    }
+    {
+     sed -i.bak 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* 2>/dev/null || true
+     cp /hadoop/centos-vault.repo /etc/yum.repos.d/centos-vault.repo
+     ( renice -n 19 -p "${BASHPID}"; ionice -c 3 -p "${BASHPID}";
+       retry 5 20 installPackages >/var/log/package-install.log 2>&1 ) &
+     echo "root:${ROOT_PASSWORD}" | chpasswd
+     echo "hadoop:${HADOOP_PASSWORD}" | chpasswd
+     getent group supergroup >/dev/null || groupadd supergroup
+     if getent passwd hadoop >/dev/null; then
+      usermod -aG supergroup hadoop 2>/dev/null || true
+     fi
+     if getent passwd hive >/dev/null; then
+      usermod -aG supergroup hive 2>/dev/null || true
+     else
+      useradd -G supergroup hive
+     fi
+     echo "hive:${HIVE_PASSWORD}" | chpasswd
+     if getent passwd admin >/dev/null; then
+      usermod -aG supergroup admin 2>/dev/null || true
+     else
+      useradd -m -s /bin/bash -G supergroup admin
+     fi
+     echo "admin:admin" | chpasswd
+     mkdir -p /home/hadoop
+     chown hadoop:hadoop /home/hadoop
+     usermod -d /home/hadoop hadoop 2>/dev/null || true
+    }
+    exit $?
+
+  hdfs-ready-nn.sh: |
+    #!/bin/bash
+    min_live="${HDFS_MIN_LIVE_DATANODES:-3}"
+    jmx="http://127.0.0.1:9870/jmx?qry=Hadoop:service=NameNode,name="
+    curl -sf --max-time 5 "${jmx}NameNodeInfo" | grep -q '"Safemode" : ""' || exit 1
+    live="$(curl -sf --max-time 5 "${jmx}FSNamesystemState" | sed -n 's/.*"NumLiveDataNodes" : \([0-9]*\).*/\1/p')"
+    [ -n "${live}" ] && [ "${live}" -ge "${min_live}" ] || exit 1
+    nc -z -w 2 127.0.0.1 8020
+
+  setup-nn.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    function showLogs(){ tail -n 40 "${HADOOP_LOG_DIR}"/*-"${1}"-*.log "${HADOOP_LOG_DIR}"/*-"${1}"-*.out 2>/dev/null || true; }
+    sudo env ROOT_PASSWORD="${ROOT_PASSWORD}" HADOOP_PASSWORD="${HADOOP_PASSWORD}" HIVE_PASSWORD="${HIVE_PASSWORD}" /hadoop/root-tasks.sh
+    POD="${POD_NAME:-$(hostname -s)}"
+    mkdir -p /home/hadoop /home/admin
+    if [ -f "/var/kerberos/incoming/${POD}.keytab" ]; then
+      sudo install -o hadoop -g hadoop -m 400 "/var/kerberos/incoming/${POD}.keytab" /home/hadoop/host-service.keytab
+    elif [ -f /var/kerberos/incoming/hadoop.keytab ]; then
+      sudo install -o hadoop -g hadoop -m 400 /var/kerberos/incoming/hadoop.keytab /home/hadoop/host-service.keytab
+    fi
+    if [ -f /var/kerberos/incoming/admin.keytab ]; then
+      sudo install -o admin -g admin -m 400 /var/kerberos/incoming/admin.keytab /home/admin/admin-service.keytab
+    fi
+    function kinitHdfsIfNeeded(){
+      [ "${HDFS_KERBEROS:-0}" = "1" ] || return 0
+      local host="${1:-$(hostname -f)}"
+      local realm="${KRB5_REALM:-SECURE.LAB}"
+      [ -f /home/hadoop/host-service.keytab ] || { echo "missing /home/hadoop/host-service.keytab"; return 1; }
+      sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/${host}@${realm}"
+    }
+    export HADOOP_HOME=/opt/hadoop
+    cp /hadoop/core-site.xml /hadoop/hdfs-site.xml /hadoop/mapred-site.xml /hadoop/hadoop-env.sh "${HADOOP_HOME}/etc/hadoop/"
+    # shellcheck source=/dev/null
+    . "${HADOOP_HOME}/etc/hadoop/hadoop-env.sh"
+    if [ "${HDFS_KERBEROS:-0}" = "1" ]; then
+      export HDFS_NAMENODE_USER=hadoop
+      export HDFS_SECONDARYNAMENODE_USER=hadoop
+      export HDFS_DATANODE_USER=hadoop
+    fi
+    kinitHdfsIfNeeded "$(hostname -f)"
+    mkdir -p /hdfs/dfs/name /hdfs/logs
+    format_check=$(find /hdfs/dfs/name -mindepth 1 -print -quit)
+    if [ -z "${format_check}" ]; then
+      echo "Formatting NameNode"
+      if [ "${HDFS_KERBEROS:-0}" = "1" ]; then
+        sudo -u hadoop "${HADOOP_HOME}/bin/hdfs" namenode -format -force -nonInteractive
+      else
+        "${HADOOP_HOME}/bin/hdfs" namenode -format -force -nonInteractive
+      fi
+    fi
+    kinitHdfsIfNeeded "$(hostname -f)"
+    daemons=("hdfs namenode" "hdfs secondarynamenode")
+    for daemon in "${daemons[@]}"; do
+      read -r cli name <<< "${daemon}"
+      "${HADOOP_HOME}/bin/${cli}" --daemon start "${name}" || { showLogs "${name}"; exit 1; }
+    done
+    if ! timeout 900 bash -c 'until /hadoop/hdfs-ready-nn.sh; do sleep 5; done'; then
+      showLogs namenode; exit 1
+    fi
+    if [ -z "${format_check}" ]; then
+      kinitHdfsIfNeeded "$(hostname -f)"
+      if [ "${HDFS_KERBEROS:-0}" = "1" ]; then
+        sudo -u hadoop hdfs dfs -mkdir -p /tmp/hive /users/hive /users/admin /users/hadoop /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+        sudo -u hadoop hdfs dfs -chmod 777 / /tmp
+        sudo -u hadoop hdfs dfs -chown -R hive:supergroup /tmp/hive /users/hive /warehouse
+        sudo -u hadoop hdfs dfs -chown admin:supergroup /users/admin
+        sudo -u hadoop hdfs dfs -chown hadoop:supergroup /users/hadoop
+      else
+        hdfs dfs -mkdir -p /tmp/hive /users/hive /users/admin /users/hadoop /warehouse/tablespace/managed/hive /warehouse/tablespace/external/hive
+        hdfs dfs -chmod 777 / /tmp
+        hdfs dfs -chown -R hive:supergroup /tmp/hive /users/hive /warehouse
+        hdfs dfs -chown admin:supergroup /users/admin
+        hdfs dfs -chown hadoop:supergroup /users/hadoop
+      fi
+    fi
+    function stopDaemons(){
+      for daemon in "hdfs secondarynamenode" "hdfs namenode"; do
+        read -r cli name <<< "${daemon}"
+        "${HADOOP_HOME}/bin/${cli}" --daemon stop "${name}" 2>/dev/null || true
+      done
+      exit 0
+    }
+    trap stopDaemons TERM
+    sleep infinity &
+    wait "$!"

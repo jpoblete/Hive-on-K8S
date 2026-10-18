@@ -1,0 +1,179 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hue
+  namespace: secure
+  labels:
+    app: hue
+spec:
+  serviceName: hue-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hue
+  template:
+    metadata:
+      labels:
+        app: hue
+    spec:
+      serviceAccountName: hue
+      automountServiceAccountToken: false
+      initContainers:
+        - name: hue-db-init
+          image: mysql:8.4
+          command: ["/bin/bash", "/config/init-hue-db.sh"]
+          env:
+            - name: MYSQL_HOST
+              value: mysql.secure.svc.cluster.local
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: mysql-root-password
+            - name: HUE_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-mysql-password
+          volumeMounts:
+            - name: hue-config
+              mountPath: /config
+              readOnly: true
+        - name: hue-migrate
+          image: gethue/hue:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+          command: ["/bin/bash", "/config/hue-migrate.sh"]
+          env:
+            - name: HUE_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-mysql-password
+            - name: HUE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-secret-key
+            - name: KRB5_CONFIG
+              value: /etc/krb5.conf
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KRB5_REALM
+              value: SECURE.LAB
+            - name: HUE_KERBEROS
+              value: "1"
+          volumeMounts:
+            - name: hue-config
+              mountPath: /config
+              readOnly: true
+            - name: hue-conf
+              mountPath: /usr/share/hue/desktop/conf
+            - name: kerberos-config
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+              readOnly: true
+            - name: kerberos-keytabs
+              mountPath: /var/kerberos/incoming
+              readOnly: true
+            - name: hue-hive-conf
+              mountPath: /usr/share/hue/desktop/conf/hive
+              readOnly: true
+      containers:
+        - name: hue
+          image: gethue/hue:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/config/entrypoint.sh"]
+          ports:
+            - name: http
+              containerPort: 8888
+              protocol: TCP
+          env:
+            - name: HUE_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-mysql-password
+            - name: HUE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-secret-key
+            - name: KRB5_CONFIG
+              value: /etc/krb5.conf
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KRB5_REALM
+              value: SECURE.LAB
+            - name: HUE_KERBEROS
+              value: "1"
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: hue-config
+              mountPath: /config
+              readOnly: true
+            - name: hue-conf
+              mountPath: /usr/share/hue/desktop/conf
+            - name: kerberos-config
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+              readOnly: true
+            - name: kerberos-keytabs
+              mountPath: /var/kerberos/incoming
+              readOnly: true
+            - name: hue-hive-conf
+              mountPath: /usr/share/hue/desktop/conf/hive
+              readOnly: true
+      volumes:
+        - name: hue-conf
+          emptyDir: {}
+        - name: hue-config
+          configMap:
+            name: hue
+            defaultMode: 0555
+        - name: kerberos-config
+          configMap:
+            name: kerberos-client
+            items:
+              - key: krb5.conf
+                path: krb5.conf
+        - name: kerberos-keytabs
+          secret:
+            secretName: kerberos-keytabs
+            defaultMode: 0400
+        - name: hue-hive-conf
+          configMap:
+            name: hue-hive-conf

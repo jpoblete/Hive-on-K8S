@@ -1,0 +1,16 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: secure
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - statefulset.yaml
+  - service.yaml
+configMapGenerator:
+  - name: hue-hive-conf
+    options:
+      disableNameSuffixHash: true
+    files:
+      - hive-site.xml=hive-site.xml

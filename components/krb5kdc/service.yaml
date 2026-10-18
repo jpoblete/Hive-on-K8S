@@ -1,0 +1,44 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: Service
+metadata:
+  name: krb5kdc
+  namespace: default
+  labels:
+    app: krb5kdc
+spec:
+  type: ClusterIP
+  selector:
+    app: krb5kdc
+  ports:
+    - name: kdc-udp
+      port: 88
+      targetPort: 88
+      protocol: UDP
+    - name: kdc-tcp
+      port: 88
+      targetPort: 88
+      protocol: TCP
+    - name: kadmin
+      port: 749
+      targetPort: 749
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: krb5kdc-headless
+  namespace: default
+  labels:
+    app: krb5kdc
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: krb5kdc
+  ports:
+    - name: kdc-tcp
+      port: 88
+      targetPort: 88
+      protocol: TCP

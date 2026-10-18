@@ -1,0 +1,120 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-datanode
+  namespace: default
+  labels:
+    app: hadoop-datanode
+spec:
+  serviceName: hadoop-datanode-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: hadoop-datanode
+  template:
+    metadata:
+      labels:
+        app: hadoop-datanode
+    spec:
+      serviceAccountName: hadoop
+      automountServiceAccountToken: false
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: hadoop-datanode
+                topologyKey: kubernetes.io/hostname
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: hadoop-datanode
+          image: apache/hadoop:3.4.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command: ["/hadoop/setup-dn.sh"]
+          env:
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: root-password
+            - name: HADOOP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hadoop-password
+            - name: HIVE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hive-password
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: admin-password
+          startupProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - nc -z -w 2 127.0.0.1 9866
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 120
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - nc -z -w 2 127.0.0.1 9866
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - nc -z -w 2 127.0.0.1 9866
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - name: mapconfig-volume
+              mountPath: /hadoop
+            - name: datanode-data
+              mountPath: /hdfs
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi
+      volumes:
+        - name: mapconfig-volume
+          configMap:
+            name: hadoop-datanode-setup
+            defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: datanode-data
+        labels:
+          app: hadoop-datanode
+      spec:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi

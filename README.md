@@ -28,8 +28,8 @@ The manifests intentionally complete the images at pod startup by installing sma
 - [**Access Hue (llap)**](#access-hue-llap-profile) — **http://localhost:8888**
 - [**Access LLAP daemon UI (llap)**](#access-llap-daemon-ui-llap-profile) — **http://localhost:15002**
 - [KIND cluster for `llap`](#kind-cluster-for-llap)
-- [Profiles](#profiles) — `standalone`, `mini`, [`llap`](#llap)
-- [Data Safety](#data-safety)
+- [Profiles](#profiles) — `standalone`, `mini`, [`llap`](#llap), [`secure`](#secure)
+- [Data Safety](#data-safety) (includes [Kind disk / prune](#kind-disk-space-imagepullbackoff))
 - [Lab OS users (`supergroup`)](#lab-os-users-supergroup)
 - [Smoke Tests](#smoke-tests)
 
@@ -79,10 +79,14 @@ The **`llap`** profile includes **[Hue](https://gethue.com/)** (`gethue/hue:late
 2. If **http://localhost:8888** already responds (typical with **kind + [`kind/llap-cluster.yaml`](kind/llap-cluster.yaml)**), it **does not** start another listener.
 3. Otherwise it runs **`kubectl port-forward svc/hue -n llap 8888:8888`** in the background (pid under **`.hivectl/`**). **`./hiveCtl.sh stop llap`** or **`stop llap hue`** stops that port-forward.
 
+While **`hue-0`** is **Ready**, **`hiveCtl.sh`** runs a background monitor (every **60s** by default) that probes **http://localhost:8888** and restarts **`kubectl port-forward`** if localhost stops responding. Logs: **`.hivectl/hue-portforward-monitor.log`**. Host **8888** without port-forward only works when the cluster was created with **`kind create cluster --config kind/llap-cluster.yaml`** (maps NodePort **30888** on the control-plane node).
+
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `HIVECTL_HUE_PORT_FORWARD` | `auto` | Set to **`0`** to never start port-forward (NodePort / kind only) |
 | `HIVECTL_HUE_LOCAL_PORT` | `8888` | Local URL port |
+| `HIVECTL_HUE_PORT_FORWARD_MONITOR` | `1` | Set to **`0`** to disable the minute-by-minute port-forward watchdog |
+| `HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL` | `60` | Seconds between Hue localhost health checks |
 
 Manual port-forward (if auto mode failed or you disabled it):
 
@@ -488,7 +492,61 @@ Back up, restore, and cleanup work the same as `mini`:
 ./hiveCtl.sh cleanup llap
 ```
 
+### `secure`
+
+**`secure`** is a **mini-shaped** stack with **distributed HDFS** (one NameNode + **three DataNodes**, **`dfs.replication=3`**), **two** Hive Metastore and **two** HiveServer2 pods, and **Hue**. **HDFS**, **Hive**, and **Hue→HS2** use **Kerberos**; the Hue **web UI** remains username/password (not SPNEGO).
+
+```text
+krb5kdc (MIT KDC) -> hadoop-namenode (+ 3× hadoop-datanode) -> mysql -> hivemetastore -> hiveserver2 -> hue
+```
+
+**MIT Kerberos:** StatefulSet **`krb5kdc-0`** runs **`krb5-kdc`** and **`kadmind`** (Debian **bookworm**, realm **`SECURE.LAB`**, Service **`krb5kdc`** on **88**/**749**). Database persists on a PVC. Lab principals **`admin/admin@SECURE.LAB`**, **`kadmin/admin@SECURE.LAB`**, **`root/admin@SECURE.LAB`** use password from Secret key **`krb5-kadmin-password`**; KDB master password is **`krb5-master-password`**. The KDC provisions **legacy lab principals** **`hadoop/hadoop@`**, **`hive/hive@`**, **`admin/admin@`**, plus **host-based** principals such as **`hdfs/<pod-fqdn>@SECURE.LAB`** and **`hive/<pod-fqdn>@SECURE.LAB`** for each secure StatefulSet pod (see **`secure-lab-hosts.list`** in **`components/krb5kdc/configmap.yaml`**). **`hiveCtl`** syncs all **`*.keytab`** files from the KDC PVC into Secret **`kerberos-keytabs`**; pods mount them under **`/var/kerberos/incoming/`** and bootstrap copies **`${POD_NAME}.keytab`** to **`host-service.keytab`** ( **`KRB5_KTNAME`** ). Hive uses headless Services so **`hostname -f`** matches those FQDNs. **HDFS Kerberos (Phase 2):** **`overlays/secure/hadoop-*`** set **`hadoop.security.authentication=kerberos`**, host keytabs, block access tokens, and SASL on the data-transfer protocol (**`dfs.data.transfer.protection=authentication`**). Secure DataNodes also require **`dfs.http.policy=HTTPS_ONLY`**; each DN generates a lab **`ssl-server.xml`** / **`ssl-client.xml`** keystore at bootstrap (**`setup-dn.sh`**). NameNode uses an explicit **`hdfs/<nn-fqdn>@`** principal (not **`hdfs/_HOST`**, because **`fs.defaultFS`** is **`hdfs://nameservice`**).
+
+**Hive Kerberos (Phase 3):** **`overlays/secure/hivemetastore`** and **`hiveserver2`** merge **`core-site.xml` / `hdfs-site.xml`** (Kerberos HDFS client) and **`hive-site.xml`** with Thrift SASL on the Metastore (**`hive.metastore.sasl.enabled`**) and **`hive.server2.authentication=KERBEROS`**. Host principals are **`hive/<pod-fqdn>@SECURE.LAB`** via **`host-service.keytab`**; **`start-hive.sh`** runs **`kinit`** when **`HIVE_KERBEROS=1`**. Metastore URIs use headless pod FQDNs (required for per-host SPNs). Example Beeline (from an HS2 pod after **`kinit`**):
+
+```bash
+beeline -u 'jdbc:hive2://hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:10000/default;principal=hive/hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local@SECURE.LAB' -e 'show databases;'
+```
+
+**Hue Kerberos:** **`overlays/secure/hue`** mounts **`hue-0`** keytab (**`hue/<hue-fqdn>@SECURE.LAB`**), **`[desktop] [[kerberos]]`** (**`krb5_renewlifetime_enabled=false`**, **`keytab_reinit_frequency=3600`** so **`kt_renewer`** re-**`kinit`**s from the keytab instead of **`kinit -R`**), and **`[beeswax]`** with **`use_sasl=true`** against **`hiveserver2-0`** headless FQDN. The Hue **web UI** is still local-user login; only the **HS2 backend** connection uses Kerberos. MySQL stays non-Kerberos.
+
+Start (NameNode startup waits until **three live DataNodes** register; first start can take several minutes):
+
+```bash
+./hiveCtl.sh start secure
+# or step-by-step:
+./hiveCtl.sh start secure hadoop-namenode   # applies NN + 3 DNs together
+./hiveCtl.sh start secure mysql
+./hiveCtl.sh start secure hivemetastore
+./hiveCtl.sh start secure hiveserver2
+./hiveCtl.sh start secure hue
+```
+
+Hue: **`hiveserver2.secure.svc.cluster.local:10000`**, NodePort **30889** (avoids clashing with **`llap`** Hue **30888**). Localhost access uses the same **`hiveCtl`** port-forward / monitor as **`llap`** (`HIVECTL_HUE_LOCAL_PORT` if both profiles run at once).
+
+Stop Hadoop (drops both NameNode and DataNode StatefulSets):
+
+```bash
+./hiveCtl.sh stop secure hadoop-namenode
+```
+
+Lab users **`admin`**, **`hadoop`**, and **`hive`** are in Unix group **`supergroup`** on Hadoop pods (`components/hadoop-namenode` / `hadoop-datanode` bootstrap).
+
+Use a cluster with **at least three nodes** (or tolerable Pending DN pods) so three **10Gi** DataNode PVCs can bind. **`./hiveCtl.sh backup secure`** / **`cleanup secure`** follow the same pattern as **`mini`** (PVC names differ for NN/DN volumes).
+
 ## Data Safety
+
+### Kind disk space (`ImagePullBackOff`)
+
+Applies to **`mini`**, **`llap`**, **`secure`**, and **`standalone`** on Kind/Docker Desktop: large images (**`apache/hive`**, **`apache/hadoop`**, **`gethue/hue`**) can fill node **`/var`** and cause **`no space left on device`** on **`ImagePullBackOff`**.
+
+**`hiveCtl.sh`** checks each cluster node’s Kind container before **`start`**, **`restore`**, and **`backup`** (once per invocation) and runs **`crictl rmi --prune`** when **`/var`** use exceeds **90%** (**`HIVECTL_DISK_MAX_USE_PERCENT`**, disable with **`HIVECTL_DISK_CHECK=0`**).
+
+```bash
+./hiveCtl.sh disk    # print /var use per node and prune if needed
+```
+
+If a node stays above **~98%**, increase Docker Desktop disk or run **`docker system prune -f`** on the host, then delete stuck pods.
 
 PVCs hold the persistent data. Deleting PVCs can cause data loss.
 
@@ -509,7 +567,8 @@ Typical keys in Secret **`hive-credentials`** (namespace = profile name):
 | `hive-metastore-password` | MySQL user for the Hive metastore schema |
 | `mysql-root-password` | MySQL `root` |
 | `admin-password` | Documented copy of the fixed lab **`admin`** password (always **`admin`**) |
-| `hue-mysql-password`, `hue-secret-key` | **`llap`** Hue only |
+| `hue-mysql-password`, `hue-secret-key` | **`llap`** and **`secure`** Hue |
+| `krb5-master-password`, `krb5-kadmin-password` | **`secure`** MIT KDC only |
 
 Treat backup directories as sensitive because they contain both data and credentials.
 

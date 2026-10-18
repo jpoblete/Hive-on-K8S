@@ -1,0 +1,19 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-datanode-headless
+  namespace: default
+  labels:
+    app: hadoop-datanode
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: hadoop-datanode
+  ports:
+    - port: 9866
+      name: data
+      targetPort: 9866
+      protocol: TCP

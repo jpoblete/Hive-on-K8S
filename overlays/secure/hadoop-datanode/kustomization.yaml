@@ -1,0 +1,36 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../components/hadoop-datanode
+patches:
+  - path: kerberos-mounts.yaml
+  - path: probes-kerberos.yaml
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: StatefulSet
+      name: hadoop-datanode
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: ConfigMap
+      name: hadoop-datanode-setup
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: Service
+      name: hadoop-datanode-headless
+configMapGenerator:
+  - name: hadoop-datanode-setup
+    behavior: merge
+    files:
+      - core-site.xml=core-site.xml
+      - hdfs-site.xml=hdfs-site.xml

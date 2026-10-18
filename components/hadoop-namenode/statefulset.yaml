@@ -1,0 +1,125 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-namenode
+  namespace: default
+  labels:
+    app: hadoop-namenode
+spec:
+  serviceName: hadoop-namenode-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hadoop-namenode
+  template:
+    metadata:
+      labels:
+        app: hadoop-namenode
+    spec:
+      serviceAccountName: hadoop
+      automountServiceAccountToken: false
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: hadoop-namenode
+          image: apache/hadoop:3.4.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          command: ["/hadoop/setup-nn.sh"]
+          env:
+            - name: ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: root-password
+            - name: HADOOP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hadoop-password
+            - name: HIVE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hive-password
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: admin-password
+            - name: HDFS_MIN_LIVE_DATANODES
+              value: "3"
+          startupProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  for port in 8020 9870; do
+                    nc -z -w 2 127.0.0.1 "${port}" || exit 1
+                  done
+                  /hadoop/hdfs-ready-nn.sh
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 90
+          readinessProbe:
+            exec:
+              command:
+                - /hadoop/hdfs-ready-nn.sh
+            periodSeconds: 10
+            timeoutSeconds: 30
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  export HADOOP_CLIENT_OPTS="-XX:TieredStopAtLevel=1 -XX:+UseSerialGC"
+                  /opt/hadoop/bin/hdfs dfs -ls / >/dev/null
+                  nc -z -w 2 127.0.0.1 8020
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - name: mapconfig-volume
+              mountPath: /hadoop
+            - name: pvc-hdfs-nn
+              mountPath: /hdfs
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 6Gi
+      volumes:
+        - name: mapconfig-volume
+          configMap:
+            name: hadoop-namenode-setup
+            defaultMode: 0755
+        - name: pvc-hdfs-nn
+          persistentVolumeClaim:
+            claimName: pvc-hdfs-nn
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-namenode-headless
+  namespace: default
+  labels:
+    app: hadoop-namenode
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: hadoop-namenode
+  ports:
+    - port: 8020
+      name: rpc
+      targetPort: 8020

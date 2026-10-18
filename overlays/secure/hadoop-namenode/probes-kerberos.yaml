@@ -1,0 +1,19 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-namenode
+spec:
+  template:
+    spec:
+      containers:
+        - name: hadoop-namenode
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  /hadoop/hdfs-ready-nn.sh
+                  nc -z -w 2 127.0.0.1 8020

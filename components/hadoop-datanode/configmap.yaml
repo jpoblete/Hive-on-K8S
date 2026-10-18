@@ -1,0 +1,188 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hadoop-datanode-setup
+  namespace: default
+  labels:
+    app: hadoop-datanode
+data:
+  core-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>fs.defaultFS</name>
+          <value>hdfs://nameservice:8020</value>
+       </property>
+       <property>
+          <name>dfs.client.use.datanode.hostname</name>
+          <value>true</value>
+       </property>
+    </configuration>
+
+  hdfs-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>dfs.datanode.data.dir</name>
+          <value>file:///hdfs/datanode</value>
+       </property>
+       <property>
+          <name>dfs.datanode.address</name>
+          <value>0.0.0.0:9866</value>
+       </property>
+       <property>
+          <name>dfs.datanode.http.address</name>
+          <value>0.0.0.0:9864</value>
+       </property>
+       <property>
+          <name>dfs.datanode.ipc.address</name>
+          <value>0.0.0.0:9867</value>
+       </property>
+    </configuration>
+
+  hadoop-env.sh: |
+    export JAVA_HOME=/usr/lib/jvm/jre
+    export HADOOP_HOME=/opt/hadoop
+    export HADOOP_HEAPSIZE=512m
+    export HADOOP_LOG_DIR=/hdfs/logs
+
+  centos-vault.repo: |
+    [vault-base]
+    name=CentOS 7.9.2009 - Base (vault)
+    baseurl=https://vault.centos.org/7.9.2009/os/$basearch/
+    gpgcheck=1
+    gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+    enabled=0
+
+  root-tasks.sh: |
+    #!/bin/bash
+    {
+     cp /hadoop/centos-vault.repo /etc/yum.repos.d/centos-vault.repo 2>/dev/null || true
+     echo "root:${ROOT_PASSWORD}" | chpasswd
+     echo "hadoop:${HADOOP_PASSWORD}" | chpasswd
+     getent group supergroup >/dev/null || groupadd supergroup
+     usermod -aG supergroup hadoop 2>/dev/null || true
+     if getent passwd hive >/dev/null; then usermod -aG supergroup hive 2>/dev/null || true; else useradd -G supergroup hive; fi
+     echo "hive:${HIVE_PASSWORD}" | chpasswd
+     if getent passwd admin >/dev/null; then usermod -aG supergroup admin 2>/dev/null || true; else useradd -m -s /bin/bash -G supergroup admin; fi
+     echo "admin:admin" | chpasswd
+     mkdir -p /home/hadoop
+     chown hadoop:hadoop /home/hadoop
+     usermod -d /home/hadoop hadoop 2>/dev/null || true
+    }
+    exit $?
+
+  setup-dn.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    function showLogs(){ tail -n 40 "${HADOOP_LOG_DIR}"/*-datanode-*.log 2>/dev/null || true; }
+    sudo env ROOT_PASSWORD="${ROOT_PASSWORD}" HADOOP_PASSWORD="${HADOOP_PASSWORD}" HIVE_PASSWORD="${HIVE_PASSWORD}" /hadoop/root-tasks.sh
+    POD="${POD_NAME:-$(hostname -s)}"
+    mkdir -p /home/hadoop /home/admin
+    if [ -f "/var/kerberos/incoming/${POD}.keytab" ]; then
+      sudo install -o hadoop -g hadoop -m 400 "/var/kerberos/incoming/${POD}.keytab" /home/hadoop/host-service.keytab
+    elif [ -f /var/kerberos/incoming/hadoop.keytab ]; then
+      sudo install -o hadoop -g hadoop -m 400 /var/kerberos/incoming/hadoop.keytab /home/hadoop/host-service.keytab
+    fi
+    if [ -f /var/kerberos/incoming/admin.keytab ]; then
+      sudo install -o admin -g admin -m 400 /var/kerberos/incoming/admin.keytab /home/admin/admin-service.keytab
+    fi
+    if [ "${HDFS_KERBEROS:-0}" = "1" ]; then
+      yum -y install krb5-workstation >/dev/null 2>&1 || true
+    fi
+    function kinitHdfsIfNeeded(){
+      [ "${HDFS_KERBEROS:-0}" = "1" ] || return 0
+      local host="${1:-$(hostname -f)}"
+      local realm="${KRB5_REALM:-SECURE.LAB}"
+      [ -f /home/hadoop/host-service.keytab ] || { echo "missing /home/hadoop/host-service.keytab"; return 1; }
+      sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/${host}@${realm}"
+    }
+    function ensureDnSslForKerberos(){
+      [ "${HDFS_KERBEROS:-0}" = "1" ] || return 0
+      local host="${1:-$(hostname -f)}"
+      local ks="/home/hadoop/dn-keystore.jks"
+      local pass="${HDFS_DN_SSL_PASSWORD:-changeit}"
+      if [ ! -f "${ks}" ]; then
+        keytool -genkeypair -alias dn -keyalg RSA -keystore "${ks}" \
+          -storepass "${pass}" -keypass "${pass}" -validity 3650 \
+          -dname "CN=${host},OU=Lab,O=Secure,L=Lab,ST=Lab,C=US" \
+          -ext "SAN=DNS:${host}" >/dev/null 2>&1
+        chmod 600 "${ks}"
+      fi
+      cat > "${HADOOP_HOME}/etc/hadoop/ssl-server.xml" <<EOF
+    <?xml version="1.0"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>ssl.server.keystore.location</name>
+          <value>${ks}</value>
+       </property>
+       <property>
+          <name>ssl.server.keystore.password</name>
+          <value>${pass}</value>
+       </property>
+       <property>
+          <name>ssl.server.keystore.keypassword</name>
+          <value>${pass}</value>
+       </property>
+       <property>
+          <name>ssl.server.truststore.location</name>
+          <value>${ks}</value>
+       </property>
+       <property>
+          <name>ssl.server.truststore.password</name>
+          <value>${pass}</value>
+       </property>
+    </configuration>
+    EOF
+      cat > "${HADOOP_HOME}/etc/hadoop/ssl-client.xml" <<EOF
+    <?xml version="1.0"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration>
+       <property>
+          <name>ssl.client.truststore.location</name>
+          <value>${ks}</value>
+       </property>
+       <property>
+          <name>ssl.client.truststore.password</name>
+          <value>${pass}</value>
+       </property>
+    </configuration>
+    EOF
+    }
+    export HADOOP_HOME=/opt/hadoop
+    cp /hadoop/core-site.xml /hadoop/hadoop-env.sh "${HADOOP_HOME}/etc/hadoop/"
+    cp /hadoop/hdfs-site.xml "${HADOOP_HOME}/etc/hadoop/hdfs-site.xml"
+    dn_host="$(hostname -f)"
+    sed -i "/<\\/configuration>/i\\
+       <property>\\
+          <name>dfs.datanode.hostname</name>\\
+          <value>${dn_host}</value>\\
+       </property>" "${HADOOP_HOME}/etc/hadoop/hdfs-site.xml"
+    if [ "${HDFS_KERBEROS:-0}" = "1" ]; then
+      sed -i \
+        -e "s|0.0.0.0:9866|${dn_host}:9866|g" \
+        -e "s|0.0.0.0:9864|${dn_host}:9864|g" \
+        -e "s|0.0.0.0:9867|${dn_host}:9867|g" \
+        "${HADOOP_HOME}/etc/hadoop/hdfs-site.xml"
+    fi
+    # shellcheck source=/dev/null
+    . "${HADOOP_HOME}/etc/hadoop/hadoop-env.sh"
+    if [ "${HDFS_KERBEROS:-0}" = "1" ]; then
+      export HDFS_DATANODE_USER=hadoop
+      ensureDnSslForKerberos "${dn_host}"
+    fi
+    kinitHdfsIfNeeded "${dn_host}"
+    mkdir -p /hdfs/datanode /hdfs/logs
+    nn_host="hadoop-namenode-0.hadoop-namenode-headless"
+    until nc -z -w 2 "${nn_host}" 8020; do echo "Waiting for NameNode at ${nn_host}:8020..."; sleep 5; done
+    if ! "${HADOOP_HOME}/bin/hdfs" --daemon start datanode; then showLogs; exit 1; fi
+    dn_probe_host="${dn_host}"
+    until nc -z -w 2 "${dn_probe_host}" 9866; do sleep 2; done
+    trap '${HADOOP_HOME}/bin/hdfs --daemon stop datanode; exit 0' TERM
+    sleep infinity &
+    wait "$!"

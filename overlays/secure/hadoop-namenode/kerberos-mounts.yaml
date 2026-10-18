@@ -1,0 +1,43 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-namenode
+spec:
+  template:
+    spec:
+      containers:
+        - name: hadoop-namenode
+          env:
+            - name: KRB5_CONFIG
+              value: /etc/krb5.conf
+            - name: KRB5_KTNAME
+              value: /home/hadoop/host-service.keytab
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HDFS_KERBEROS
+              value: "1"
+            - name: KRB5_REALM
+              value: SECURE.LAB
+          volumeMounts:
+            - name: kerberos-config
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+              readOnly: true
+            - name: kerberos-keytabs
+              mountPath: /var/kerberos/incoming
+              readOnly: true
+      volumes:
+        - name: kerberos-config
+          configMap:
+            name: kerberos-client
+            items:
+              - key: krb5.conf
+                path: krb5.conf
+        - name: kerberos-keytabs
+          secret:
+            secretName: kerberos-keytabs
+            defaultMode: 0400

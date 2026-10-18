@@ -1,0 +1,40 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:  
+  - serviceaccount.yaml
+  - headless-service.yaml
+  - ../../../base
+#
+# Namespace adjustments
+#
+patches:
+  - path: kerberos-mounts.yaml
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/serviceName
+        value: hivemetastore-headless
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+configMapGenerator:
+  - name: hivemetastore
+    behavior: merge
+    files:
+      - hive-site.xml=hive-site.xml
+      - core-site.xml=core-site.xml
+      - hdfs-site.xml=hdfs-site.xml

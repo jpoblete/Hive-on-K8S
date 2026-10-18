@@ -1,0 +1,29 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hadoop-datanode
+spec:
+  template:
+    spec:
+      containers:
+        - name: hadoop-datanode
+          startupProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - nc -z -w 2 "$(hostname -f)" 9866
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - nc -z -w 2 "$(hostname -f)" 9866
+          livenessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - nc -z -w 2 "$(hostname -f)" 9866

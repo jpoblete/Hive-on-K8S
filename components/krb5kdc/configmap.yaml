@@ -1,0 +1,237 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: krb5kdc-setup
+  namespace: default
+  labels:
+    app: krb5kdc
+data:
+  krb5.conf.template: |
+    [libdefaults]
+        default_realm = __REALM__
+        dns_lookup_kdc = true
+        dns_lookup_realm = false
+        rdns = false
+        ticket_lifetime = 24h
+        forwardable = true
+        udp_preference_limit = 1
+
+    [realms]
+        __REALM__ = {
+            kdc = krb5kdc:88
+            admin_server = krb5kdc:749
+            default_domain = secure.lab
+        }
+
+    [domain_realm]
+        .secure.svc.cluster.local = __REALM__
+        secure.svc.cluster.local = __REALM__
+        .secure.lab = __REALM__
+        secure.lab = __REALM__
+
+  kdc.conf.template: |
+    [kdcdefaults]
+        kdc_ports = 88
+        kdc_tcp_ports = 88
+
+    [realms]
+        __REALM__ = {
+            database_name = /var/lib/krb5kdc/principal
+            key_stash_file = /var/lib/krb5kdc/stash
+            acl_file = /etc/krb5kdc/kadm5.acl
+            dict_file = /usr/share/dict/words
+            admin_keytab = /var/lib/krb5kdc/kadm5.keytab
+            max_renewable_life = 7d 0h 0m 0s
+            max_life = 24h 0m 0s
+            master_key_type = aes256-cts
+            supported_enctypes = aes256-cts:normal aes128-cts:normal
+        }
+
+    [logging]
+        kdc = STDERR
+        admin_server = STDERR
+        default = STDERR
+
+  kadm5.acl.template: |
+    */admin@__REALM__	*
+    kadmin/admin@__REALM__	*
+    root/admin@__REALM__	*
+
+  setup-kdc.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+    REALM="${KRB5_REALM:-SECURE.LAB}"
+    MARKER="/var/lib/krb5kdc/.mit-kdc-initialized"
+
+    # Probes may run while this script is still bootstrapping; install nc first (Hadoop installs nmap-ncat similarly).
+    if ! command -v nc >/dev/null 2>&1; then
+      apt-get update
+      apt-get install -y --no-install-recommends netcat-openbsd
+    fi
+
+    if ! command -v krb5kdc >/dev/null 2>&1; then
+      apt-get update
+      apt-get install -y --no-install-recommends krb5-kdc krb5-admin-server krb5-user wamerican
+    fi
+
+    mkdir -p /etc/krb5kdc /var/lib/krb5kdc /var/run/krb5kdc
+    sed "s|__REALM__|${REALM}|g" /config/krb5.conf.template > /etc/krb5.conf
+    sed "s|__REALM__|${REALM}|g" /config/kdc.conf.template > /etc/krb5kdc/kdc.conf
+    sed "s|__REALM__|${REALM}|g" /config/kadm5.acl.template > /etc/krb5kdc/kadm5.acl
+
+    function wipeKdcDatabase(){
+      echo "Removing MIT Kerberos database on PVC (${REALM})"
+      rm -f /var/lib/krb5kdc/stash /var/lib/krb5kdc/principal* /var/lib/krb5kdc/kadm5.*
+      rm -f "${MARKER}" /var/lib/krb5kdc/keytabs/.lab-keytabs-hadoop-hive-admin
+      rm -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v1 /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2
+      rm -f /var/lib/krb5kdc/keytabs/*.keytab
+    }
+
+    function createKdcDatabase(){
+      echo "Creating MIT Kerberos database for realm ${REALM}"
+      kdb5_util create -s -P "${KRB5_MASTER_PASSWORD}"
+      kadmin.local -q "addprinc -pw ${KRB5_KADMIN_PASSWORD} admin/admin@${REALM}"
+      kadmin.local -q "addprinc -pw ${KRB5_KADMIN_PASSWORD} kadmin/admin@${REALM}"
+      kadmin.local -q "addprinc -pw ${KRB5_KADMIN_PASSWORD} root/admin@${REALM}"
+      date -Iseconds > "${MARKER}"
+    }
+
+    STASH="/var/lib/krb5kdc/stash"
+
+    if [ -f /var/lib/krb5kdc/principal ]; then
+      echo "MIT Kerberos database already present (${REALM})"
+      if [ ! -f "${STASH}" ] || ! kdb5_util stash -f "${STASH}" -P "${KRB5_MASTER_PASSWORD}" >/dev/null 2>&1; then
+        echo "KDC database or stash does not match Secret krb5-master-password; reinitializing lab KDC"
+        wipeKdcDatabase
+      fi
+    fi
+
+    if [ ! -f /var/lib/krb5kdc/principal ]; then
+      createKdcDatabase
+    else
+      kdb5_util stash -f "${STASH}" -P "${KRB5_MASTER_PASSWORD}"
+    fi
+
+    /config/provision-lab-keytabs.sh
+    /config/provision-host-keytabs.sh
+
+    function stopDaemons(){
+      pkill -x krb5kdc 2>/dev/null || true
+      pkill -x kadmind 2>/dev/null || true
+      wait 2>/dev/null || true
+      exit 0
+    }
+    trap stopDaemons TERM INT
+
+    # Daemons detach from the shell; keep the container alive using pid files (do not use wait on $!).
+    KDC_PIDFILE="/var/run/krb5kdc/krb5kdc.pid"
+    KADM_PIDFILE="/var/run/krb5kdc/kadmind.pid"
+    /usr/sbin/krb5kdc -P "${KDC_PIDFILE}"
+    /usr/sbin/kadmind -P "${KADM_PIDFILE}"
+    sleep 2
+    KDC_PID="$(cat "${KDC_PIDFILE}")"
+    KADM_PID="$(cat "${KADM_PIDFILE}")"
+    if ! kill -0 "${KDC_PID}" 2>/dev/null || ! kill -0 "${KADM_PID}" 2>/dev/null; then
+      echo "krb5kdc or kadmind failed to start for ${REALM}"
+      exit 1
+    fi
+    echo "MIT krb5kdc and kadmind running for ${REALM} (pids ${KDC_PID}, ${KADM_PID})"
+    while kill -0 "${KDC_PID}" 2>/dev/null && kill -0 "${KADM_PID}" 2>/dev/null; do
+      sleep 30
+    done
+    echo "krb5kdc or kadmind exited unexpectedly"
+    exit 1
+
+  provision-lab-keytabs.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    REALM="${KRB5_REALM:-SECURE.LAB}"
+    KEYTAB_DIR="/var/lib/krb5kdc/keytabs"
+    MARKER="${KEYTAB_DIR}/.lab-keytabs-hadoop-hive-admin"
+
+    mkdir -p "${KEYTAB_DIR}"
+
+    function ensure_keytab(){
+      local princ="$1"
+      local keytab="$2"
+      kadmin.local -q "addprinc -randkey ${princ}" 2>/dev/null || true
+      rm -f "${keytab}"
+      kadmin.local -q "ktadd -k ${keytab} ${princ}"
+      chmod 400 "${keytab}"
+    }
+
+    if [ -f "${MARKER}" ]; then
+      echo "Lab keytabs already provisioned (${MARKER})"
+      exit 0
+    fi
+
+    echo "Creating principals and keytabs for hadoop, hive, and admin (${REALM})"
+    ensure_keytab "hadoop/hadoop@${REALM}" "${KEYTAB_DIR}/hadoop.keytab"
+    ensure_keytab "hive/hive@${REALM}" "${KEYTAB_DIR}/hive.keytab"
+    kadmin.local -q "addprinc -pw ${KRB5_KADMIN_PASSWORD} admin/admin@${REALM}" 2>/dev/null || true
+    rm -f "${KEYTAB_DIR}/admin.keytab"
+    kadmin.local -q "ktadd -k ${KEYTAB_DIR}/admin.keytab admin/admin@${REALM}"
+    chmod 400 "${KEYTAB_DIR}/admin.keytab"
+    date -Iseconds > "${MARKER}"
+    ls -la "${KEYTAB_DIR}"
+
+  secure-lab-hosts.list: |
+    hadoop-namenode-0.hadoop-namenode-headless.secure.svc.cluster.local|hdfs|hadoop-namenode-0
+    hadoop-datanode-0.hadoop-datanode-headless.secure.svc.cluster.local|hdfs|hadoop-datanode-0
+    hadoop-datanode-1.hadoop-datanode-headless.secure.svc.cluster.local|hdfs|hadoop-datanode-1
+    hadoop-datanode-2.hadoop-datanode-headless.secure.svc.cluster.local|hdfs|hadoop-datanode-2
+    hivemetastore-0.hivemetastore-headless.secure.svc.cluster.local|hive|hivemetastore-0
+    hivemetastore-1.hivemetastore-headless.secure.svc.cluster.local|hive|hivemetastore-1
+    hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local|hive|hiveserver2-0
+    hiveserver2-1.hiveserver2-headless.secure.svc.cluster.local|hive|hiveserver2-1
+    hue-0.hue-headless.secure.svc.cluster.local|hue|hue-0
+
+  provision-host-keytabs.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    REALM="${KRB5_REALM:-SECURE.LAB}"
+    KEYTAB_DIR="/var/lib/krb5kdc/keytabs"
+    MARKER="${KEYTAB_DIR}/.lab-host-keytabs-v2"
+    HOSTS_FILE="/config/secure-lab-hosts.list"
+
+    mkdir -p "${KEYTAB_DIR}"
+
+    function ensure_host_keytab(){
+      local host="$1"
+      local service="$2"
+      local pod="$3"
+      local princ="${service}/${host}@${REALM}"
+      local http_princ="HTTP/${host}@${REALM}"
+      local keytab="${KEYTAB_DIR}/${pod}.keytab"
+      kadmin.local -q "addprinc -randkey ${princ}" 2>/dev/null || true
+      kadmin.local -q "addprinc -randkey ${http_princ}" 2>/dev/null || true
+      rm -f "${keytab}"
+      kadmin.local -q "ktadd -k ${keytab} ${princ} ${http_princ}"
+      chmod 400 "${keytab}"
+    }
+
+    function sync_host_keytabs_from_list(){
+      while IFS='|' read -r host service pod; do
+        [ -n "${host}" ] || continue
+        [[ "${host}" =~ ^# ]] && continue
+        local keytab="${KEYTAB_DIR}/${pod}.keytab"
+        if [ ! -f "${keytab}" ]; then
+          ensure_host_keytab "${host}" "${service}" "${pod}"
+        fi
+      done < "${HOSTS_FILE}"
+    }
+
+    if [ -f "${MARKER}" ]; then
+      echo "Host keytabs marker present (${MARKER}); ensuring missing entries"
+      sync_host_keytabs_from_list
+      ls -la "${KEYTAB_DIR}"
+      exit 0
+    fi
+
+    echo "Creating host-based principals for secure lab (${REALM})"
+    sync_host_keytabs_from_list
+    date -Iseconds > "${MARKER}"
+    ls -la "${KEYTAB_DIR}"

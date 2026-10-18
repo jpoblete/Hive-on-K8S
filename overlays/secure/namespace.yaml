@@ -1,0 +1,7 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Namespace for the planned "secure" profile (Kerberos, 3 DataNodes). Components land under overlays/secure/.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure

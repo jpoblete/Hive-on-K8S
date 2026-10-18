@@ -1,0 +1,185 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - headless-service.yaml
+  - ../../../base/
+#
+# General rename of metadata
+#
+patches:
+  - path: kerberos-mounts.yaml
+  - patch: |-
+      - op: replace
+        path: /metadata/name
+        value: hiveserver2
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /metadata/labels
+        value:
+          app: hiveserver2
+    target:
+      name: hivemetastore
+#
+# StatefulSet
+#
+  - patch: |-
+      - op: replace
+        path: /spec/template/metadata/labels
+        value:
+          app: hiveserver2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/selector/matchLabels
+        value:
+          app: hiveserver2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/serviceName
+        value: hiveserver2-headless
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: SERVICE
+            value: "hiveserver2"
+          - name: BEELINE_URL
+            value: "jdbc:hive2://hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:10000/default;principal=hive/hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local@SECURE.LAB"
+          - name: ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: root-password
+          - name: HIVE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-password
+          - name: ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: admin-password
+          - name: HIVE_METASTORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: hive-metastore-password
+          - name: BEELINE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: hive-credentials
+                key: beeline-password
+          - name: KRB5_CONFIG
+            value: /etc/krb5.conf
+          - name: KRB5_KTNAME
+            value: /home/hive/host-service.keytab
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: HIVE_KERBEROS
+            value: "1"
+          - name: KRB5_REALM
+            value: SECURE.LAB
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/startupProbe/tcpSocket/port
+        value: 10000
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe/tcpSocket/port
+        value: 10000
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+#
+# Service
+#
+  - patch: |-
+      - op: replace
+        path: /spec/ports/0
+        value:
+          port: 10000
+          targetPort: 10000
+          name: binary
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/ports/1
+        value:
+          port: 10001
+          targetPort: 10001
+          name: http
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: add
+        path: /spec/ports/2
+        value:
+          port: 10002
+          targetPort: 10002
+          name: webui
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/selector
+        value:
+          app: hiveserver2
+    target:
+      kind: Service
+      name: hivemetastore
+
+configMapGenerator:
+  - name: hivemetastore
+    behavior: merge
+    files:
+      - hive-site.xml=hive-site.xml
+      - core-site.xml=core-site.xml
+      - hdfs-site.xml=hdfs-site.xml
+#EOF

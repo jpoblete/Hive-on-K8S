@@ -1,0 +1,98 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: krb5kdc
+  namespace: default
+  labels:
+    app: krb5kdc
+spec:
+  serviceName: krb5kdc-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: krb5kdc
+  template:
+    metadata:
+      labels:
+        app: krb5kdc
+    spec:
+      serviceAccountName: krb5kdc
+      automountServiceAccountToken: false
+      containers:
+        - name: krb5kdc
+          image: debian:bookworm-slim
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/config/setup-kdc.sh"]
+          env:
+            - name: KRB5_REALM
+              value: SECURE.LAB
+            - name: KRB5_MASTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: krb5-master-password
+            - name: KRB5_KADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: krb5-kadmin-password
+          ports:
+            - name: kdc-tcp
+              containerPort: 88
+              protocol: TCP
+            - name: kdc-udp
+              containerPort: 88
+              protocol: UDP
+            - name: kadmin
+              containerPort: 749
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: 88
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - '(echo >/dev/tcp/127.0.0.1/88) && (echo >/dev/tcp/127.0.0.1/749)'
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 88
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - name: krb5kdc-config
+              mountPath: /config
+            - name: krb5kdc-data
+              mountPath: /var/lib/krb5kdc
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: krb5kdc-config
+          configMap:
+            name: krb5kdc-setup
+            defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: krb5kdc-data
+        labels:
+          app: krb5kdc
+      spec:
+        storageClassName: standard
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
