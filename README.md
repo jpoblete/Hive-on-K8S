@@ -25,10 +25,10 @@ The manifests intentionally complete the images at pod startup by installing sma
 ## Contents
 
 - [Images by profile](#images-by-profile)
-- [**Access Hue (llap)**](#access-hue-llap-profile) — **http://localhost:8888**
+- [**Access Hue (llap / secure)**](#access-hue-llap--secure-profiles) — **http://localhost:8888**
 - [**Access LLAP daemon UI (llap)**](#access-llap-daemon-ui-llap-profile) — **http://localhost:15002**
 - [KIND cluster for `llap`](#kind-cluster-for-llap)
-- [Profiles](#profiles) — `standalone`, `mini`, [`llap`](#llap), [`secure`](#secure)
+- [Profiles](#profiles) — `standalone` → `mini` → [`llap`](#llap) → [`secure`](#secure)
 - [Data Safety](#data-safety) (includes [Kind disk / prune](#kind-disk-space-imagepullbackoff))
 - [Lab OS users (`supergroup`)](#lab-os-users-supergroup)
 - [Smoke Tests](#smoke-tests)
@@ -38,8 +38,13 @@ The manifests intentionally complete the images at pod startup by installing sma
 ```text
 standalone:   apache/hive:4.2.0   (embedded Metastore + HiveServer2 in one pod)
 mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
+              apache/hadoop:3.4.1 (single-node HDFS in one pod)
 llap:         apache/hive:nightly (Hive Metastore x2, HiveServer2 x2, LLAP daemon x2)
-              gethue/hue:latest (Hue SQL UI → see Access Hue (llap profile))
+              apache/hadoop:3.4.1, gethue/hue:latest (Hue → Access Hue)
+secure:       apache/hive:4.2.0   (Hive Metastore x2, HiveServer2 x2)
+              apache/hadoop:3.4.1 (NameNode + 3 DataNodes; Kerberos HDFS)
+              debian:bookworm-slim (MIT KDC in krb5kdc-0)
+              gethue/hue:latest (Hue → HS2 with SASL/Kerberos backend)
 ```
 
 `mini` and `standalone` pin the released **4.2.0** image. **`llap` uses the moving `nightly` tag** (Beeline reports **4.3.0-SNAPSHOT** today) so Tez and LLAP pick up fixes not in 4.2.0—notably [HIVE-29566](https://issues.apache.org/jira/browse/HIVE-29566), where reopening a Tez session in the same HiveServer2 JVM could fail with `JvmMetrics already exists` on grouped/aggregating queries. After an image bump, metastore pods run `schematool` on startup if the schema version changed. Leave headroom on kind or Docker Desktop nodes when pulling `nightly` (~1.5 GiB per node that schedules a Hive pod). To pin `llap` to a release tag again, change the image patch in `overlays/llap/hivemetastore/kustomization.yaml`, `overlays/llap/hiveserver2/kustomization.yaml`, and `overlays/llap/llapdaemon/kustomization.yaml`.
@@ -62,14 +67,14 @@ kind
 minikube
 ```
 
-## Access Hue (llap profile)
+## Access Hue (llap / secure profiles)
 
-The **`llap`** profile includes **[Hue](https://gethue.com/)** (`gethue/hue:latest`) for browser-based SQL.
+The **`llap`** and **`secure`** profiles include **[Hue](https://gethue.com/)** (`gethue/hue:latest`) for browser-based SQL. **`llap`** connects to HiveServer2 with JDBC user/password; **`secure`** keeps the Hue **web UI** as local login but uses **Kerberos (SASL)** from Hue to HiveServer2 (see **[`secure` → Hue](#secure-hue)**).
 
 ### Default: open **http://localhost:8888** after start
 
 ```bash
-./hiveCtl.sh start llap
+./hiveCtl.sh start llap    # or: ./hiveCtl.sh start secure
 # When Hue is Ready, hiveCtl prints: Hue UI: http://localhost:8888/ ...
 ```
 
@@ -94,11 +99,18 @@ Manual port-forward (if auto mode failed or you disabled it):
 kubectl port-forward svc/hue -n llap 8888:8888
 ```
 
-**NodePort only:** Service **`hue`** publishes **30888** (`overlays/llap/hue/service.yaml`) — try **http://localhost:30888** on Docker Desktop, or `http://<node-ip>:30888`.
+**NodePort only:**
 
-First visit: complete Hue’s setup wizard. The SQL editor lists **Hive** only (**Impala** is disabled via `app_blacklist` in `overlays/llap/hue/configmap.yaml`). Hive login uses user **`hive`** and **`beeline-password`** from Secret `hive-credentials`.
+| Profile | Service | NodePort | Manifest |
+|---------|---------|----------|----------|
+| **`llap`** | `hue` in namespace `llap` | **30888** | `overlays/llap/hue/service.yaml` |
+| **`secure`** | `hue` in namespace `secure` | **30889** | `overlays/secure/hue/service.yaml` |
 
-More detail: **[`llap` profile → Hue](#hue-llap-sql-ui)**.
+Try **http://localhost:30888** or **http://localhost:30889** on Docker Desktop, or `http://<node-ip>:<port>`. If both profiles run at once, set **`HIVECTL_HUE_LOCAL_PORT`** to a free port for the second profile’s port-forward.
+
+First visit (**`llap`**): complete Hue’s setup wizard. The SQL editor lists **Hive** only (**Impala** is disabled via `app_blacklist` in `overlays/llap/hue/configmap.yaml`). Hive login uses user **`hive`** and **`beeline-password`** from Secret `hive-credentials`.
+
+More detail: **[`llap` → Hue](#hue-llap-sql-ui)** and **[`secure` → Hue](#secure-hue)**.
 
 ## Access LLAP daemon UI (llap profile)
 
@@ -170,9 +182,16 @@ llap only:
   CPUs:            6+
   disk:            30 GB+
   worker nodes:    2+ (one LLAP daemon per node)
+
+secure only:
+  host RAM:        32 GB+
+  Kubernetes RAM:  22-26 GB+
+  CPUs:            6+
+  disk:            50 GB+ (NameNode + 3× DataNode + KDC + MySQL PVCs, 10 Gi each)
+  worker nodes:    3+ recommended (three DataNode PVCs; Pending DNs block NameNode format)
 ```
 
-Run `llap` on its own: its two LLAP daemons alone use about 9 GB, so stop `standalone` and `mini` first (`stop` keeps their PVCs).
+Run **`llap`** or **`secure`** on their own: **`llap`** adds ZooKeeper, two LLAP daemons (~9 GB together), and Hue; **`secure`** adds a KDC and four Hadoop pods (NN + 3 DN) on top of a **mini-shaped** Hive stack. Stop other profiles first (`stop` keeps their PVCs).
 
 With kind on Docker Desktop, every node is a container in the same VM and reports the whole VM memory as allocatable. Adding nodes gives the scheduler more places to put pods, not more memory; raise the Docker Desktop memory instead.
 
@@ -195,7 +214,7 @@ kubectl label node desktop-worker4 desktop-worker5 node-role.kubernetes.io/llap=
 
 Without two schedulable, distinct nodes, the second `llapdaemon` replica stays pending. Unlabeled nodes can still run daemons, but the scheduler may spread LLAP onto the same hosts as other heavy pods unless you label dedicated workers.
 
-This template also maps **Hue** to the host: after `./hiveCtl.sh start llap`, open **http://localhost:8888** (full steps in **[Access Hue (llap profile)](#access-hue-llap-profile)**). That mapping is **not** done by `hiveCtl.sh`; it is in `extraPortMappings` on the control-plane node below.
+This template also maps **Hue** to the host: after `./hiveCtl.sh start llap`, open **http://localhost:8888** (full steps in **[Access Hue (llap profile)](#access-hue-llap--secure-profiles)**). That mapping is **not** done by `hiveCtl.sh`; it is in `extraPortMappings` on the control-plane node below.
 
 Recommended local runtime settings:
 
@@ -223,6 +242,14 @@ Hue pod:         2 Gi limit (768 Mi request); uses MySQL database `hue` on the l
 ```
 
 ## Profiles
+
+Profiles are documented **simplest first**, each step adding services and operational complexity:
+
+```text
+standalone  →  mini  →  llap  →  secure
+  Derby          HDFS+MySQL     + ZooKeeper,      + KDC, 3× DN,
+  one pod        one Hadoop      LLAP×2, Hue       Kerberos, Hue
+```
 
 ### `standalone`
 
@@ -387,7 +414,7 @@ Cleanup mini data and namespace:
 
 > **Before you start:** label **two** worker nodes with `node-role.kubernetes.io/llap` (see **[KIND cluster for `llap`](#kind-cluster-for-llap)**). This repo does not apply that label for you; the kind template in `kind/llap-cluster.yaml` is the supported way to get `desktop-worker4` and `desktop-worker5` labeled on a fresh cluster.
 
-`llap` is `mini` plus ZooKeeper and two Hive LLAP daemons. Hive pods use **`apache/hive:nightly`** (see **Images by profile**); that build includes the HIVE-29566 Tez-session fix, which matters here because HiveServer2 keeps a Tez session pool warm for LLAP while clients run many queries in the same JVM.
+**`llap`** builds on **`mini`**: add ZooKeeper, two Hive LLAP daemons, and Hue. Hive pods use **`apache/hive:nightly`** (see **Images by profile**); that build includes the HIVE-29566 Tez-session fix, which matters here because HiveServer2 keeps a Tez session pool warm for LLAP while clients run many queries in the same JVM.
 
 ```text
 hadoop -> mysql -> zookeeper -> hivemetastore -> llapdaemon (x2) -> hiveserver2 -> hue
@@ -430,7 +457,7 @@ Start:
 ./hiveCtl.sh start llap
 ```
 
-**Open Hue:** see **[Access Hue (llap profile)](#access-hue-llap-profile)** — typically **http://localhost:8888** (kind + `kind/llap-cluster.yaml`) or `kubectl port-forward svc/hue -n llap 8888:8888`.
+**Open Hue:** see **[Access Hue (llap profile)](#access-hue-llap--secure-profiles)** — typically **http://localhost:8888** (kind + `kind/llap-cluster.yaml`) or `kubectl port-forward svc/hue -n llap 8888:8888`.
 
 Stop:
 
@@ -459,7 +486,7 @@ beeline -e "SELECT count(*) FROM managed_3_1;"
 
 ### Hue (llap SQL UI)
 
-> **Quick access:** **[Access Hue (llap profile)](#access-hue-llap-profile)** (start command, readiness check, and browser URLs).
+> **Quick access:** **[Access Hue (llap profile)](#access-hue-llap--secure-profiles)** (start command, readiness check, and browser URLs).
 
 **Hue** starts **after** HiveServer2. It uses MySQL database **`hue`** (`hue-mysql-password`, `hue-secret-key` in `hive-credentials`). Queries go to **`hiveserver2.llap.svc.cluster.local:10000`** with user **`hive`** / **`beeline-password`**. Older clusters get Hue keys patched on `./hiveCtl.sh start llap` or `start llap hue`.
 
@@ -480,9 +507,9 @@ beeline -e "SELECT count(*) FROM managed_3_1;"
 |-------|------|
 | `overlays/llap/hue/service.yaml` | Kubernetes Service **`hue`**, NodePort **30888** → pod **8888** |
 | `kind/llap-cluster.yaml` | Host **http://localhost:8888** → control-plane NodePort **30888** |
-| `kubectl port-forward` | Host **http://localhost:8888** on any cluster (see **[Access Hue](#access-hue-llap-profile)**) |
+| `kubectl port-forward` | Host **http://localhost:8888** on any cluster (see **[Access Hue](#access-hue-llap--secure-profiles)**) |
 
-On **`start llap hue`**, `hiveCtl.sh` also attempts localhost exposure (see **[Access Hue](#access-hue-llap-profile)**). The Service above is what port-forward connects to.
+On **`start llap hue`**, `hiveCtl.sh` also attempts localhost exposure (see **[Access Hue](#access-hue-llap--secure-profiles)**). The Service above is what port-forward connects to.
 
 Back up, restore, and cleanup work the same as `mini`:
 
@@ -494,27 +521,20 @@ Back up, restore, and cleanup work the same as `mini`:
 
 ### `secure`
 
-**`secure`** is a **mini-shaped** stack with **distributed HDFS** (one NameNode + **three DataNodes**, **`dfs.replication=3`**), **two** Hive Metastore and **two** HiveServer2 pods, and **Hue**. **HDFS**, **Hive**, and **Hue→HS2** use **Kerberos**; the Hue **web UI** remains username/password (not SPNEGO).
+**`secure`** is the most elaborate profile: **mini-shaped** Hive + MySQL + Hue, but with **distributed Kerberos HDFS** (one NameNode + **three DataNodes**, **`dfs.replication=3`**), **two** Hive Metastore and **two** HiveServer2 pods, and **Hue**. Namespace and profile name: **`secure`**. Manifests live under **`components/hadoop-namenode`**, **`components/hadoop-datanode`**, **`components/krb5kdc`**, and **`overlays/secure/*`**.
 
 ```text
-krb5kdc (MIT KDC) -> hadoop-namenode (+ 3× hadoop-datanode) -> mysql -> hivemetastore -> hiveserver2 -> hue
+krb5kdc -> hadoop-namenode (+ 3× hadoop-datanode) -> mysql -> hivemetastore -> hiveserver2 -> hue
 ```
 
-**MIT Kerberos:** StatefulSet **`krb5kdc-0`** runs **`krb5-kdc`** and **`kadmind`** (Debian **bookworm**, realm **`SECURE.LAB`**, Service **`krb5kdc`** on **88**/**749**). Database persists on a PVC. Lab principals **`admin/admin@SECURE.LAB`**, **`kadmin/admin@SECURE.LAB`**, **`root/admin@SECURE.LAB`** use password from Secret key **`krb5-kadmin-password`**; KDB master password is **`krb5-master-password`**. The KDC provisions **legacy lab principals** **`hadoop/hadoop@`**, **`hive/hive@`**, **`admin/admin@`**, plus **host-based** principals such as **`hdfs/<pod-fqdn>@SECURE.LAB`** and **`hive/<pod-fqdn>@SECURE.LAB`** for each secure StatefulSet pod (see **`secure-lab-hosts.list`** in **`components/krb5kdc/configmap.yaml`**). **`hiveCtl`** syncs all **`*.keytab`** files from the KDC PVC into Secret **`kerberos-keytabs`**; pods mount them under **`/var/kerberos/incoming/`** and bootstrap copies **`${POD_NAME}.keytab`** to **`host-service.keytab`** ( **`KRB5_KTNAME`** ). Hive uses headless Services so **`hostname -f`** matches those FQDNs. **HDFS Kerberos (Phase 2):** **`overlays/secure/hadoop-*`** set **`hadoop.security.authentication=kerberos`**, host keytabs, block access tokens, and SASL on the data-transfer protocol (**`dfs.data.transfer.protection=authentication`**). Secure DataNodes also require **`dfs.http.policy=HTTPS_ONLY`**; each DN generates a lab **`ssl-server.xml`** / **`ssl-client.xml`** keystore at bootstrap (**`setup-dn.sh`**). NameNode uses an explicit **`hdfs/<nn-fqdn>@`** principal (not **`hdfs/_HOST`**, because **`fs.defaultFS`** is **`hdfs://nameservice`**).
+**HDFS**, **Hive Metastore/HS2**, and **Hue→HS2** use **Kerberos**; the Hue **web UI** remains username/password (not SPNEGO). MySQL is not Kerberized.
 
-**Hive Kerberos (Phase 3):** **`overlays/secure/hivemetastore`** and **`hiveserver2`** merge **`core-site.xml` / `hdfs-site.xml`** (Kerberos HDFS client) and **`hive-site.xml`** with Thrift SASL on the Metastore (**`hive.metastore.sasl.enabled`**) and **`hive.server2.authentication=KERBEROS`**. Host principals are **`hive/<pod-fqdn>@SECURE.LAB`** via **`host-service.keytab`**; **`start-hive.sh`** runs **`kinit`** when **`HIVE_KERBEROS=1`**. Metastore URIs use headless pod FQDNs (required for per-host SPNs). Example Beeline (from an HS2 pod after **`kinit`**):
-
-```bash
-beeline -u 'jdbc:hive2://hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:10000/default;principal=hive/hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local@SECURE.LAB' -e 'show databases;'
-```
-
-**Hue Kerberos:** **`overlays/secure/hue`** mounts **`hue-0`** keytab (**`hue/<hue-fqdn>@SECURE.LAB`**), **`[desktop] [[kerberos]]`** (**`krb5_renewlifetime_enabled=false`**, **`keytab_reinit_frequency=3600`** so **`kt_renewer`** re-**`kinit`**s from the keytab instead of **`kinit -R`**), and **`[beeswax]`** with **`use_sasl=true`** against **`hiveserver2-0`** headless FQDN. The Hue **web UI** is still local-user login; only the **HS2 backend** connection uses Kerberos. MySQL stays non-Kerberos.
-
-Start (NameNode startup waits until **three live DataNodes** register; first start can take several minutes):
+Start order is enforced by **`hiveCtl.sh start secure`** (KDC first, then Hadoop, then the rest). NameNode bootstrap waits until **three live DataNodes** register; the first start can take several minutes.
 
 ```bash
 ./hiveCtl.sh start secure
 # or step-by-step:
+./hiveCtl.sh start secure krb5kdc
 ./hiveCtl.sh start secure hadoop-namenode   # applies NN + 3 DNs together
 ./hiveCtl.sh start secure mysql
 ./hiveCtl.sh start secure hivemetastore
@@ -522,23 +542,79 @@ Start (NameNode startup waits until **three live DataNodes** register; first sta
 ./hiveCtl.sh start secure hue
 ```
 
-Hue: **`hiveserver2.secure.svc.cluster.local:10000`**, NodePort **30889** (avoids clashing with **`llap`** Hue **30888**). Localhost access uses the same **`hiveCtl`** port-forward / monitor as **`llap`** (`HIVECTL_HUE_LOCAL_PORT` if both profiles run at once).
-
-Stop Hadoop (drops both NameNode and DataNode StatefulSets):
+Stop the full profile or individual components (Hadoop stop drops **both** NameNode and DataNode StatefulSets):
 
 ```bash
+./hiveCtl.sh stop secure
 ./hiveCtl.sh stop secure hadoop-namenode
 ```
 
+Status and shells:
+
+```bash
+./hiveCtl.sh status
+kubectl get pods,pvc,svc -n secure -o wide
+kubectl exec -it hadoop-namenode-0 -n secure -- bash
+kubectl exec -it hiveserver2-0 -n secure -- su - hive
+```
+
+#### MIT Kerberos (KDC)
+
+StatefulSet **`krb5kdc-0`** runs **`krb5-kdc`** and **`kadmind`** on **`debian:bookworm-slim`**, realm **`SECURE.LAB`**, Service **`krb5kdc`** on **88** / **749**. The KDB persists on PVC **`krb5kdc-data-krb5kdc-0`**.
+
+Lab principals include **`admin/admin@SECURE.LAB`**, **`kadmin/admin@SECURE.LAB`**, **`root/admin@SECURE.LAB`** (password: Secret **`krb5-kadmin-password`**), plus host SPNs such as **`hdfs/<pod-fqdn>@SECURE.LAB`**, **`hive/<pod-fqdn>@SECURE.LAB`**, and **`hue/<pod-fqdn>@SECURE.LAB`** for each entry in **`secure-lab-hosts.list`** (`components/krb5kdc/configmap.yaml`).
+
+**`hiveCtl.sh`** waits for host keytabs on the KDC PVC, then copies **`*.keytab`** into Secret **`kerberos-keytabs`**. Pods mount them at **`/var/kerberos/incoming/`**; bootstrap installs **`${POD_NAME}.keytab`** as **`host-service.keytab`** (**`KRB5_KTNAME`**). Hive and Hadoop use **headless Services** so **`hostname -f`** matches those FQDNs.
+
+#### HDFS (NameNode + DataNodes)
+
+**`overlays/secure/hadoop-namenode`** and **`hadoop-datanode`** set **`hadoop.security.authentication=kerberos`**, block access tokens, and **`dfs.data.transfer.protection=authentication`**. DataNodes require **`dfs.http.policy=HTTPS_ONLY`** and generate lab TLS keystores at bootstrap (`components/hadoop-datanode/configmap.yaml`). The NameNode uses an explicit **`hdfs/<nn-fqdn>@SECURE.LAB`** principal (not **`hdfs/_HOST`**) because **`fs.defaultFS`** is **`hdfs://nameservice`**. HDFS admin CLI and backups use pod **`hadoop-namenode-0`**, not **`hadoop-0`**.
+
+#### Hive (Metastore + HiveServer2)
+
+**`overlays/secure/hivemetastore`** and **`hiveserver2`** merge **`core-site.xml`**, **`hdfs-site.xml`**, and **`hive-site.xml`**: Thrift SASL on the Metastore, **`hive.server2.authentication=KERBEROS`**, per-host **`hive/<pod-fqdn>@SECURE.LAB`** keytabs, and **`hive.server2.enable.doAs=false`**. Metastore Thrift URIs list headless pod FQDNs. Hive **`hdfs-site.xml`** includes a minimal **nameservice** HA client block so Kerberos delegation tokens resolve against **`hdfs://nameservice`**. **`start-hive.sh`** runs **`kinit`** when **`HIVE_KERBEROS=1`**.
+
+Kerberos Beeline from an HS2 pod (interactive shell, or **`script -qefc 'beeline ...' /dev/null`** for non-TTY **`kubectl exec`**):
+
+```bash
+kubectl exec -it hiveserver2-0 -n secure -- su - hive
+beeline -u "${BEELINE_URL}" -e "select 1;"
+beeline -u 'jdbc:hive2://hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:10000/default;principal=hive/hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local@SECURE.LAB' -e 'show databases;'
+```
+
+#### Secure Hue
+
+<a id="secure-hue"></a>
+
+**`overlays/secure/hue`** mounts the **`hue-0`** keytab (**`hue/<hue-fqdn>@SECURE.LAB`**), configures **`[desktop] [[kerberos]]`** (**`krb5_renewlifetime_enabled=false`**, **`keytab_reinit_frequency=3600`** so Hue re-**`kinit`**s from the keytab instead of **`kinit -R`**), and **`[beeswax]`** with **`use_sasl=true`** to **`hiveserver2-0`** headless FQDN. JDBC to HS2 uses Kerberos; the browser login stays Hue’s local user database.
+
+**Open Hue:** **[Access Hue (llap / secure)](#access-hue-llap--secure-profiles)** — **http://localhost:8888** (port-forward) or NodePort **30889** (`overlays/secure/hue/service.yaml`).
+
+```bash
+./hiveCtl.sh start secure hue
+kubectl port-forward svc/hue -n secure 8888:8888
+```
+
+#### Backup, restore, cleanup
+
+Same workflow as **`mini`**, with secure-specific PVCs and HDFS backup via **`hadoop-namenode-0`** (Kerberos **`kinit`** inside the pod):
+
+```bash
+./hiveCtl.sh backup secure
+./hiveCtl.sh restore secure ./backups/secure-YYYYMMDD-HHMMSS
+./hiveCtl.sh cleanup secure
+```
+
+**`cleanup secure`** deletes PVCs: **`mysql-mysql-0`**, **`pvc-hdfs-nn`**, **`datanode-data-hadoop-datanode-{0,1,2}`**, **`krb5kdc-data-krb5kdc-0`**, then the namespace. Restore after cleanup reapplies **`hive-credentials.secret.json`**, starts **KDC → Hadoop → MySQL**, loads MySQL + HDFS from the backup, then starts Hive and Hue.
+
 Lab users **`admin`**, **`hadoop`**, and **`hive`** are in Unix group **`supergroup`** on Hadoop pods (`components/hadoop-namenode` / `hadoop-datanode` bootstrap).
 
-Use a cluster with **at least three nodes** (or tolerable Pending DN pods) so three **10Gi** DataNode PVCs can bind. **`./hiveCtl.sh backup secure`** / **`cleanup secure`** follow the same pattern as **`mini`** (PVC names differ for NN/DN volumes).
 
 ## Data Safety
 
 ### Kind disk space (`ImagePullBackOff`)
 
-Applies to **`mini`**, **`llap`**, **`secure`**, and **`standalone`** on Kind/Docker Desktop: large images (**`apache/hive`**, **`apache/hadoop`**, **`gethue/hue`**) can fill node **`/var`** and cause **`no space left on device`** on **`ImagePullBackOff`**.
+Applies to **`standalone`**, **`mini`**, **`llap`**, and **`secure`** on Kind/Docker Desktop: large images (**`apache/hive`**, **`apache/hadoop`**, **`gethue/hue`**) can fill node **`/var`** and cause **`no space left on device`** on **`ImagePullBackOff`**.
 
 **`hiveCtl.sh`** checks each cluster node’s Kind container before **`start`**, **`restore`**, and **`backup`** (once per invocation) and runs **`crictl rmi --prune`** when **`/var`** use exceeds **90%** (**`HIVECTL_DISK_MAX_USE_PERCENT`**, disable with **`HIVECTL_DISK_CHECK=0`**).
 
@@ -580,6 +656,7 @@ Use backup before cleanup:
 ./hiveCtl.sh backup standalone
 ./hiveCtl.sh backup mini
 ./hiveCtl.sh backup llap
+./hiveCtl.sh backup secure
 ```
 
 Restore:
@@ -588,6 +665,7 @@ Restore:
 ./hiveCtl.sh restore standalone <backup-dir>
 ./hiveCtl.sh restore mini <backup-dir>
 ./hiveCtl.sh restore llap <backup-dir>
+./hiveCtl.sh restore secure <backup-dir>
 ```
 
 Restore also works after cleanup or on a new cluster: it creates the namespace with the backed-up credentials, starts the storage, loads the backup, and then starts the rest of the stack. If MySQL already has a volume, the current credentials are kept, because MySQL created its users with them and the metastore dump doesn't include users.
@@ -598,6 +676,7 @@ Destructive cleanup requires confirmation and offers to create a backup first:
 ./hiveCtl.sh cleanup standalone
 ./hiveCtl.sh cleanup mini
 ./hiveCtl.sh cleanup llap
+./hiveCtl.sh cleanup secure
 ```
 
 ## Bootstrap Model
@@ -611,9 +690,10 @@ The startup scripts use `root` to:
 
 The long-running services then run as:
 
-- `hadoop` for Hadoop
+- `hadoop` for Hadoop (**`mini`** / **`llap`**: one pod; **`secure`**: NameNode and DataNode pods)
 - `hive` for Hive Metastore, HiveServer2, and the LLAP daemons
 - `zookeeper` for ZooKeeper (`llap` only; the image drops privileges itself)
+- `root`-installed scripts on **`krb5kdc-0`** then KDC daemons as packaged by Debian (`secure` only)
 
 This keeps the upstream images unchanged while still making the lab reproducible.
 
@@ -621,9 +701,10 @@ The Hadoop container restarts itself when HDFS stops answering: its liveness pro
 
 ```bash
 kubectl exec hadoop-0 -n mini -- ls -l /hdfs/logs
+kubectl exec hadoop-namenode-0 -n secure -- ls -l /hdfs/logs
 ```
 
-Deleting the Hadoop pod stops the HDFS daemons cleanly, in reverse start order, instead of waiting out the grace period. YARN stays configured but isn't started, since HiveServer2 runs Tez itself; to bring it back, add the ResourceManager and NodeManager to the daemon list in `components/hadoop/configmap.yaml`.
+Deleting the Hadoop pod stops the HDFS daemons cleanly, in reverse start order, instead of waiting out the grace period. On **`secure`**, stop **`hadoop-namenode`** (via **`hiveCtl`**) to tear down NameNode and all DataNodes together. YARN stays configured but isn't started, since HiveServer2 runs Tez itself; to bring it back, add the ResourceManager and NodeManager to the daemon list in `components/hadoop/configmap.yaml` (**`mini`** / **`llap`** only).
 
 ## Lab OS users (`supergroup`)
 
@@ -638,7 +719,7 @@ Hadoop treats members of Unix group **`supergroup`** like a superuser group for 
 
 **Not for production** — fixed **`admin`/`admin`** is intentional for local labs only.
 
-On **`mini`** / **`llap`**, first HDFS format (Hadoop pod) creates **`/users/admin`** owned **`admin:supergroup`**, alongside **`/users/hive`** and warehouse paths owned **`hive:supergroup`**.
+On **`mini`** / **`llap`**, first HDFS format (Hadoop pod) creates **`/users/admin`** owned **`admin:supergroup`**, alongside **`/users/hive`** and warehouse paths owned **`hive:supergroup`**. On **`secure`**, the same layout is created under **`/user/...`** and **`/warehouse/...`** when the NameNode formats (after three DataNodes register).
 
 Log in as **`admin`** inside a Hive pod:
 
@@ -648,16 +729,17 @@ kubectl exec -it hiveserver2-0 -n llap -- su - admin
 id    # should list supergroup
 ```
 
-Same on **`hadoop-0`** for HDFS CLI as **`admin`**:
+Same on **`hadoop-0`** (**`mini`** / **`llap`**) or **`hadoop-namenode-0`** (**`secure`**) for HDFS CLI as **`admin`** (Kerberos **`kinit`** as **`hdfs/...`** on **`secure`** before **`hdfs dfs`**):
 
 ```bash
 kubectl exec -it hadoop-0 -n llap -- su - admin
 hdfs dfs -ls /
+kubectl exec -it hadoop-namenode-0 -n secure -- bash -lc 'sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/$(hostname -f)@SECURE.LAB"; sudo -u admin hdfs dfs -ls /'
 ```
 
 After upgrading manifests, **restart** Hive/Hadoop pods (or `./hiveCtl.sh restart <profile> <component>`) so **`staging.sh`** / **`root-tasks.sh`** recreate group membership. Existing clusters get **`admin-password`** patched to **`admin`** on the next `./hiveCtl.sh start`.
 
-Implementation: **`ensureSupergroupLabUsers`** in `base/configmap.yaml` (Hive), matching logic in `components/hadoop/configmap.yaml` and `overlays/standalone/hive/configmap.yaml`.
+Implementation: **`ensureSupergroupLabUsers`** in `base/configmap.yaml` (Hive), matching logic in `components/hadoop/configmap.yaml` (**`mini`** / **`llap`**), `components/hadoop-namenode/configmap.yaml` and `components/hadoop-datanode/configmap.yaml` (**`secure`**), and `overlays/standalone/hive/configmap.yaml`.
 
 ## Smoke Tests
 
@@ -711,7 +793,7 @@ LLAP **`admin`** OS user (`admin` / `admin`, **`supergroup`**):
 kubectl exec hiveserver2-0 -n llap -it -- su - admin -c 'id && hdfs dfs -ls /users 2>/dev/null || true'
 ```
 
-LLAP Hue — see **[Access Hue (llap profile)](#access-hue-llap-profile)**:
+LLAP Hue — see **[Access Hue (llap profile)](#access-hue-llap--secure-profiles)**:
 
 ```bash
 kubectl get pods,svc -n llap -l app=hue
@@ -728,6 +810,40 @@ kubectl wait --for=condition=ready pod/llapdaemon-0 -n llap --timeout=300s
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:15002/
 ```
 
+Secure KDC and HDFS (Kerberos):
+
+```bash
+kubectl get pods -n secure -l app=krb5kdc
+kubectl exec krb5kdc-0 -n secure -- kadmin.local -q 'list_principals' | head
+kubectl exec hadoop-namenode-0 -n secure -- bash -lc \
+  'sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/$(hostname -f)@SECURE.LAB"; hdfs dfs -ls /'
+kubectl get pods -n secure -l app=hadoop-datanode
+```
+
+Secure Beeline (Kerberos JDBC; use an interactive shell or **`script -qefc '...' /dev/null`** under **`kubectl exec`**):
+
+```bash
+kubectl exec -it hiveserver2-0 -n secure -- su - hive
+beeline -u "${BEELINE_URL}" -e "select 1;"
+beeline -u "${BEELINE_URL}" -e "show databases;"
+```
+
+Secure backup / restore smoke (destructive **`cleanup`** prompts for confirmation):
+
+```bash
+./hiveCtl.sh backup secure
+./hiveCtl.sh cleanup secure    # offers backup; type profile name to confirm
+./hiveCtl.sh restore secure ./backups/secure-YYYYMMDD-HHMMSS
+```
+
+Secure Hue — see **[Access Hue (llap / secure)](#access-hue-llap--secure-profiles)**:
+
+```bash
+kubectl get pods,svc -n secure -l app=hue
+kubectl wait --for=condition=ready pod/hue-0 -n secure --timeout=300s
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8888/
+```
+
 ## Validation
 
 Render all overlays:
@@ -735,7 +851,9 @@ Render all overlays:
 ```bash
 for d in overlays/standalone/hive \
          overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 \
-         overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2 overlays/llap/hue; do
+         overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2 overlays/llap/hue \
+         overlays/secure/krb5kdc overlays/secure/hadoop-namenode overlays/secure/hadoop-datanode overlays/secure/mysql \
+         overlays/secure/hivemetastore overlays/secure/hiveserver2 overlays/secure/hue; do
   kustomize build "$d" --load-restrictor LoadRestrictionsNone | kubectl apply --dry-run=client -f -
 done
 ```
