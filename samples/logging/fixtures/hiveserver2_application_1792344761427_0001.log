@@ -1,0 +1,6 @@
+2026-10-18 17:32:40,012 INFO  [HiveServer2-Handler-1] tez.TezSession: Using working directory: hdfs://nameservice:8020/opt/hive/scratch_dir/hive/_tez_session_dir/9890ded2/.tez/application_1792344761427_0001_wd
+2026-10-18 17:32:40,145 INFO  [HiveServer2-Handler-1] tez.DagClient: Submitting DAG dag_1792344761427_0001_1 for application_1792344761427_0001: SELECT p1, count(*) from t group by p1 order by p1 desc (Stage-1)
+2026-10-18 17:32:41,002 INFO  [TezAM-1] tez.DagAppMaster: DAG dag_1792344761427_0001_1 state change from NEW to RUNNING (application_1792344761427_0001)
+2026-10-18 17:32:42,881 WARN  [TezAM-1] tez.DagAppMaster: application_1792344761427_0001 vertex Map 1: local fetch wait exceeded 500ms
+2026-10-18 17:32:44,501 INFO  [TezAM-1] tez.DagAppMaster: Event:DAG_FINISHED dag_1792344761427_0001_1 status=SUCCEEDED application_1792344761427_0001
+2026-10-18 17:32:44,620 INFO  [HiveServer2-Handler-1] ql.Driver: Completed executing command(queryId=hive_20261018173240_xyz); Time taken: 4.608 seconds

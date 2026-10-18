@@ -118,7 +118,7 @@ patches:
                 name: hive-credentials
                 key: beeline-password
           - name: HIVE_LOG_HDFS_BASE
-            value: "hdfs://nameservice:8020/logs/llap"
+            value: "hdfs://nameservice:8020/user/hive/logs/llap"
           - name: HIVE_LOG_HDFS_SYNC_INTERVAL_SEC
             value: "300"
     target:

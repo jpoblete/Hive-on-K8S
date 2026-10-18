@@ -1,0 +1,88 @@
+LLAP daemon logs for Tez application application_1792344698416_0001 (yarn logs layout).
+Source: llapdaemon process log on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+
+Container: llap_executor@llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002 on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:13 +0000 2026
+LogLength:932
+LogContents:
+=== LLAP INFO / WARN (application scope) ===
+2026-10-18 17:32:10,123 INFO  [IPC Server handler 4 on default port 15002] llap.LlapDaemon: Received work request for application_1792344698416_0001 queryId=hive_20261018173210_abc123def456
+2026-10-18 17:32:10,456 INFO  [TezChild:1] exec.TezTask: Executing Fragment [0] for dag_1792344698416_0001_1 application_1792344698416_0001
+2026-10-18 17:32:10,789 INFO  [TezChild:1] exec.TezTask: Fragment [0] finished successfully for application_1792344698416_0001
+2026-10-18 17:32:11,012 INFO  [TezChild:2] exec.TezTask: Executing Fragment [1] for dag_1792344698416_0001_1 application_1792344698416_0001
+2026-10-18 17:32:11,345 WARN  [TezChild:2] exec.TezTask: Slow IO read on application_1792344698416_0001 fragment [1] took 1200ms
+2026-10-18 17:32:13,001 INFO  [IPC Server handler 7] llap.LlapDaemon: Work completed for application_1792344698416_0001 queryId=hive_20261018173210_abc123def456
+
+End of LogType:syslog
+*******************************************************************************************
+
+Container: llap_executor@llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002 on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:13 +0000 2026
+LogLength:646
+LogContents:
+=== LLAP session / executor log ===
+2026-10-18 17:32:10,123 INFO  [IPC Server handler 4 on default port 15002] llap.LlapDaemon: Received work request for application_1792344698416_0001 queryId=hive_20261018173210_abc123def456
+2026-10-18 17:32:11,345 WARN  [TezChild:2] exec.TezTask: Slow IO read on application_1792344698416_0001 fragment [1] took 1200ms
+2026-10-18 17:32:12,678 ERROR [TezChild:3] exec.TezTask: Query failed for application_1792344698416_0001 dag_1792344698416_0001_2
+2026-10-18 17:32:13,001 INFO  [IPC Server handler 7] llap.LlapDaemon: Work completed for application_1792344698416_0001 queryId=hive_20261018173210_abc123def456
+
+End of LogType:syslog
+*******************************************************************************************
+
+Container: llap_executor@llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002 on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:syslog_Fragment [0]
+LogLastModifiedTime:Sun Oct 18 17:32:13 +0000 2026
+LogLength:288
+LogContents:
+=== Fragment [0] ===
+2026-10-18 17:32:10,456 INFO  [TezChild:1] exec.TezTask: Executing Fragment [0] for dag_1792344698416_0001_1 application_1792344698416_0001
+2026-10-18 17:32:10,789 INFO  [TezChild:1] exec.TezTask: Fragment [0] finished successfully for application_1792344698416_0001
+
+End of LogType:syslog_Fragment [0]
+*******************************************************************************************
+
+Container: llap_executor@llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002 on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:syslog_Fragment [1]
+LogLastModifiedTime:Sun Oct 18 17:32:13 +0000 2026
+LogLength:161
+LogContents:
+=== Fragment [1] ===
+2026-10-18 17:32:11,012 INFO  [TezChild:2] exec.TezTask: Executing Fragment [1] for dag_1792344698416_0001_1 application_1792344698416_0001
+
+End of LogType:syslog_Fragment [1]
+*******************************************************************************************
+
+Container: llap_executor@llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002 on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:stderr
+LogLastModifiedTime:Sun Oct 18 17:32:13 +0000 2026
+LogLength:130
+LogContents:
+2026-10-18 17:32:12,678 ERROR [TezChild:3] exec.TezTask: Query failed for application_1792344698416_0001 dag_1792344698416_0001_2
+
+End of LogType:stderr
+*******************************************************************************************
+
+Container: llap_executor@llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002 on llapdaemon-0.llapdaemon-headless.llap.svc.cluster.local:15002
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:13 +0000 2026
+LogLength:1
+LogContents:
+
+
+End of LogType:stdout
+*******************************************************************************************
+

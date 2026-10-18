@@ -21,7 +21,7 @@ set -o pipefail
 #
 # Print command usage and supported actions.
 function help(){
-   echo "Usage:  hiveCtl [available|start|stop|status|restart|backup|restore|cleanup|disk] <overlay> [<component>]"
+   echo "Usage:  hiveCtl [available|start|stop|status|restart|backup|restore|cleanup|disk|resync-keytabs] <overlay> [<component>]"
    echo "        hiveCtl available"
    echo "        hiveCtl start   <overlay>"
    echo "        hiveCtl stop    <overlay>"
@@ -33,6 +33,7 @@ function help(){
    echo "        hiveCtl restore <overlay> <backup-dir>"
    echo "        hiveCtl cleanup <overlay>"
    echo "        hiveCtl disk   (check Kind node /var space; prune container images if low)"
+   echo "        hiveCtl resync-keytabs <overlay>   (secure: refresh Secret kerberos-keytabs from KDC PVC)"
    echo "        hiveCtl status"
    echo ""
    echo "Hue (llap|secure): after start, hiveCtl tries http://localhost:8888 automatically"
@@ -223,17 +224,17 @@ function ensureKerberosKeytabSecret(){
    fi
    waitForReady "${namespace}" "krb5kdc" || return 1
    waitForLabKeytabs "${namespace}" || return 1
-   if ! kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 2>/dev/null; then
-      echo "Waiting for host keytabs on krb5kdc (.lab-host-keytabs-v2) ..."
+   if ! kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v3 2>/dev/null; then
+      echo "Waiting for host keytabs on krb5kdc (.lab-host-keytabs-v3) ..."
       local attempt=0
       while [ "${attempt}" -lt 60 ]; do
-         if kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 2>/dev/null; then
+         if kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v3 2>/dev/null; then
             break
          fi
          attempt=$((attempt + 1))
          sleep 5
       done
-      kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 2>/dev/null || return 1
+      kubectl exec -n "${namespace}" krb5kdc-0 -- test -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v3 2>/dev/null || return 1
    fi
    tmpdir="$(mktemp -d)"
    trap 'rm -rf "${tmpdir}"' RETURN
@@ -1708,6 +1709,22 @@ main(){
           ;;
         disk)
           showClusterDisk
+          ;;
+        resync-keytabs)
+          [[ -z "${2:-}" ]] && help && exit 1
+          HIVECTL_KRB5_RESYNC_KEYTABS=1 ensureKerberosKeytabSecret "$2" || exit 1
+          echo "Updated Secret kerberos-keytabs in namespace '${2}'."
+          if [ "$2" = "secure" ]; then
+             echo "Restarting Hadoop + Hive so pods remount v3 keytabs (FQDN + pod short name) ..."
+             stopOverlay "secure_hiveserver2" || true
+             stopOverlay "secure_hivemetastore" || true
+             stopSecureHadoop || exit 1
+             startSecureHadoop || exit 1
+             startOverlay "secure_hivemetastore" || exit 1
+             startOverlay "secure_hiveserver2" || exit 1
+          else
+             echo "Restart Kerberos-enabled pods in '${2}' to remount keytabs."
+          fi
           ;;
         restart)
           [[ -z "${2:-}" ]] && help && exit 1

@@ -2,6 +2,10 @@
 <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
 <configuration>
    <property>
+      <name>dfs.permissions.superusergroup</name>
+      <value>supergroup</value>
+   </property>
+   <property>
       <name>dfs.datanode.data.dir</name>
       <value>file:///hdfs/datanode</value>
    </property>
@@ -36,5 +40,17 @@
    <property>
       <name>dfs.http.policy</name>
       <value>HTTPS_ONLY</value>
+   </property>
+   <property>
+      <name>dfs.datanode.https.address</name>
+      <value>0.0.0.0:9865</value>
+   </property>
+   <property>
+      <name>dfs.web.authentication.kerberos.principal</name>
+      <value>HTTP/_HOST@SECURE.LAB</value>
+   </property>
+   <property>
+      <name>dfs.web.authentication.kerberos.keytab</name>
+      <value>/home/hadoop/host-service.keytab</value>
    </property>
 </configuration>

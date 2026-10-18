@@ -1,0 +1,47 @@
+Specified ALL for -am option. Printed logs for all am containers (Tez local mode).
+Container: hiveserver2-0:8042 on hiveserver2-0:8042
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 18:10:02 +0000 2026
+LogLength:700
+LogContents:
+2026-10-18 18:10:00,100 INFO  [HiveServer2-Handler-2] tez.TezSession: Using working directory: hdfs://nameservice:8020/opt/hive/scratch_dir/hive/_tez_session_dir/uuid/.tez/application_1792344999999_0001_wd
+2026-10-18 18:10:01,500 WARN  [TezAM-2] tez.DagAppMaster: application_1792344999999_0001: Map 1 has 2048 tasks; many splits may indicate small files
+2026-10-18 18:10:02,301 ERROR [TezAM-2] tez.DagAppMaster: org.apache.tez.common.TezException: Vertex Map 1 failed
+2026-10-18 18:10:02,302 ERROR [TezAM-2] tez.DagAppMaster: Caused by: java.lang.NullPointerException
+2026-10-18 18:10:02,303 ERROR [TezAM-2] tez.DagAppMaster: 	at org.apache.hadoop.hive.ql.exec.tez.TezTask.execute(TezTask.java:210)
+
+End of LogType:syslog
+*******************************************************************************************
+
+Container: hiveserver2-0:8042 on hiveserver2-0:8042
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:stderr
+LogLastModifiedTime:Sun Oct 18 18:10:02 +0000 2026
+LogLength:980
+LogContents:
+2026-10-18 18:10:00,100 INFO  [HiveServer2-Handler-2] tez.TezSession: Using working directory: hdfs://nameservice:8020/opt/hive/scratch_dir/hive/_tez_session_dir/uuid/.tez/application_1792344999999_0001_wd
+2026-10-18 18:10:00,200 INFO  [HiveServer2-Handler-2] tez.DagClient: Submitting DAG dag_1792344999999_0001_1 for application_1792344999999_0001 (Stage-1)
+2026-10-18 18:10:01,500 WARN  [TezAM-2] tez.DagAppMaster: application_1792344999999_0001: Map 1 has 2048 tasks; many splits may indicate small files
+2026-10-18 18:10:02,300 ERROR [TezAM-2] tez.DagAppMaster: DAG dag_1792344999999_0001_1 failed. application_1792344999999_0001
+2026-10-18 18:10:02,301 ERROR [TezAM-2] tez.DagAppMaster: org.apache.tez.common.TezException: Vertex Map 1 failed
+2026-10-18 18:10:02,302 ERROR [TezAM-2] tez.DagAppMaster: Caused by: java.lang.NullPointerException
+2026-10-18 18:10:02,303 ERROR [TezAM-2] tez.DagAppMaster: 	at org.apache.hadoop.hive.ql.exec.tez.TezTask.execute(TezTask.java:210)
+
+End of LogType:stderr
+*******************************************************************************************
+
+Container: hiveserver2-0:8042 on hiveserver2-0:8042
+LogAggregationType: AGGREGATED
+==========================================================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 18:10:02 +0000 2026
+LogLength:1
+LogContents:
+
+
+End of LogType:stdout
+*******************************************************************************************
+

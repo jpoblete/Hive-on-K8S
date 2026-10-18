@@ -1,0 +1,1283 @@
+Tez application application_1792344698416_0001 (local mode; synthesized yarn-logs layout)
+Tez AM tez_appattempt_1792344698416_0001_000000 (application_1792344698416_0001)
+DAG dag_1792344698416_0001_1 submitted: INSERT INTO ext_ice_o......TTTkR07G', 20328) (Stage-1)
+DAG dag_1792344698416_0001_2 submitted: INSERT INTO ext_ice_o......UW2YlMUok', 1150) (Stage-1)
+DAG dag_1792344698416_0001_3 submitted: INSERT INTO ext_ice_o......KVP1NY4U', 29512) (Stage-1)
+DAG dag_1792344698416_0001_4 submitted: INSERT INTO ext_ice_o......gob55Hf6', 32674) (Stage-1)
+DAG dag_1792344698416_0001_5 submitted: INSERT INTO ext_ice_o......nbhyAd9lc', 7328) (Stage-1)
+DAG dag_1792344698416_0001_6 submitted: INSERT INTO ext_ice_o......SgvtJ9Fn', 31432) (Stage-1)
+DAG dag_1792344698416_0001_7 submitted: INSERT INTO ext_ice_o......C7f9dAee', 19819) (Stage-1)
+DAG dag_1792344698416_0001_8 submitted: INSERT INTO ext_ice_o......HJE4ao5nl', 4145) (Stage-1)
+DAG dag_1792344698416_0001_9 submitted: INSERT INTO ext_ice_o......R3ZLMWaU', 10835) (Stage-1)
+DAG dag_1792344698416_0001_10 submitted: INSERT INTO ext_ice_o......z327rXVgr', 3055) (Stage-1)
+
+Container: container_1792344698416_0001_00_000001 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000001 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:823
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_1_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000001/hive
+Tez task attempt finished: attempt_1792344698416_0001_1_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 498
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6572
+  OUTPUT_BYTES_WITH_OVERHEAD=6097
+  OUTPUT_BYTES_PHYSICAL=6105
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000002 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000002 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:779
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_1_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000002/hive
+Tez task attempt finished: attempt_1792344698416_0001_1_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 706
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=16
+  MERGE_PHASE_TIME=20
+  FIRST_EVENT_RECEIVED=13
+  LAST_EVENT_RECEIVED=13
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000003 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000003 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:746
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_1_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000003/hive
+Tez task attempt finished: attempt_1792344698416_0001_1_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 222
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2286
+  SHUFFLE_BYTES=2286
+  SHUFFLE_BYTES_DECOMPRESSED=2282
+  SHUFFLE_BYTES_DISK_DIRECT=2286
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000004 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000004 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:823
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_2_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000004/hive
+Tez task attempt finished: attempt_1792344698416_0001_2_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 186
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6540
+  OUTPUT_BYTES_WITH_OVERHEAD=6065
+  OUTPUT_BYTES_PHYSICAL=6073
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000005 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000005 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:775
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_2_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000005/hive
+Tez task attempt finished: attempt_1792344698416_0001_2_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 192
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=4
+  MERGE_PHASE_TIME=4
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000006 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000006 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:748
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_2_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000006/hive
+Tez task attempt finished: attempt_1792344698416_0001_2_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 268
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2254
+  SHUFFLE_BYTES=2254
+  SHUFFLE_BYTES_DECOMPRESSED=2250
+  SHUFFLE_BYTES_DISK_DIRECT=2254
+  SHUFFLE_PHASE_TIME=45
+  MERGE_PHASE_TIME=45
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000007 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000007 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:822
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_3_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000007/hive
+Tez task attempt finished: attempt_1792344698416_0001_3_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 57
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6572
+  OUTPUT_BYTES_WITH_OVERHEAD=6097
+  OUTPUT_BYTES_PHYSICAL=6105
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000008 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000008 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:745
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_3_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000008/hive
+Tez task attempt finished: attempt_1792344698416_0001_3_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 97
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2286
+  SHUFFLE_BYTES=2286
+  SHUFFLE_BYTES_DECOMPRESSED=2282
+  SHUFFLE_BYTES_DISK_DIRECT=2286
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000009 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000009 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:777
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_3_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000009/hive
+Tez task attempt finished: attempt_1792344698416_0001_3_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 372
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=53
+  MERGE_PHASE_TIME=54
+  FIRST_EVENT_RECEIVED=3
+  LAST_EVENT_RECEIVED=3
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000010 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000010 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:822
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_4_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000010/hive
+Tez task attempt finished: attempt_1792344698416_0001_4_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 80
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6613
+  OUTPUT_BYTES_WITH_OVERHEAD=6138
+  OUTPUT_BYTES_PHYSICAL=6146
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000011 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000011 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:747
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_4_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000011/hive
+Tez task attempt finished: attempt_1792344698416_0001_4_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 123
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2327
+  SHUFFLE_BYTES=2327
+  SHUFFLE_BYTES_DECOMPRESSED=2323
+  SHUFFLE_BYTES_DISK_DIRECT=2327
+  SHUFFLE_PHASE_TIME=3
+  MERGE_PHASE_TIME=11
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000012 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000012 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:779
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_4_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000012/hive
+Tez task attempt finished: attempt_1792344698416_0001_4_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 377
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=63
+  MERGE_PHASE_TIME=63
+  FIRST_EVENT_RECEIVED=61
+  LAST_EVENT_RECEIVED=61
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000013 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000013 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:822
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_5_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000013/hive
+Tez task attempt finished: attempt_1792344698416_0001_5_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 49
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6602
+  OUTPUT_BYTES_WITH_OVERHEAD=6127
+  OUTPUT_BYTES_PHYSICAL=6135
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000014 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000014 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:748
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_5_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000014/hive
+Tez task attempt finished: attempt_1792344698416_0001_5_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 120
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2316
+  SHUFFLE_BYTES=2316
+  SHUFFLE_BYTES_DECOMPRESSED=2312
+  SHUFFLE_BYTES_DISK_DIRECT=2316
+  SHUFFLE_PHASE_TIME=10
+  MERGE_PHASE_TIME=10
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000015 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000015 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:775
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_5_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000015/hive
+Tez task attempt finished: attempt_1792344698416_0001_5_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 123
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000016 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000016 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:823
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_6_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000016/hive
+Tez task attempt finished: attempt_1792344698416_0001_6_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 227
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6598
+  OUTPUT_BYTES_WITH_OVERHEAD=6123
+  OUTPUT_BYTES_PHYSICAL=6131
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000017 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000017 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:746
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_6_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000017/hive
+Tez task attempt finished: attempt_1792344698416_0001_6_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 135
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2312
+  SHUFFLE_BYTES=2312
+  SHUFFLE_BYTES_DECOMPRESSED=2308
+  SHUFFLE_BYTES_DISK_DIRECT=2312
+  SHUFFLE_PHASE_TIME=3
+  MERGE_PHASE_TIME=3
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000018 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000018 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:775
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_6_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000018/hive
+Tez task attempt finished: attempt_1792344698416_0001_6_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 273
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=1
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000019 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000019 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:823
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_7_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000019/hive
+Tez task attempt finished: attempt_1792344698416_0001_7_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 100
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6541
+  OUTPUT_BYTES_WITH_OVERHEAD=6066
+  OUTPUT_BYTES_PHYSICAL=6074
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000020 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000020 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:746
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_7_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000020/hive
+Tez task attempt finished: attempt_1792344698416_0001_7_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 236
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2255
+  SHUFFLE_BYTES=2255
+  SHUFFLE_BYTES_DECOMPRESSED=2251
+  SHUFFLE_BYTES_DISK_DIRECT=2255
+  SHUFFLE_PHASE_TIME=3
+  MERGE_PHASE_TIME=3
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000021 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000021 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:775
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_7_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000021/hive
+Tez task attempt finished: attempt_1792344698416_0001_7_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 165
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000022 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000022 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:823
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_8_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000022/hive
+Tez task attempt finished: attempt_1792344698416_0001_8_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 174
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6564
+  OUTPUT_BYTES_WITH_OVERHEAD=6089
+  OUTPUT_BYTES_PHYSICAL=6097
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000023 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000023 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:747
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_8_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000023/hive
+Tez task attempt finished: attempt_1792344698416_0001_8_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 90
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2278
+  SHUFFLE_BYTES=2278
+  SHUFFLE_BYTES_DECOMPRESSED=2274
+  SHUFFLE_BYTES_DISK_DIRECT=2278
+  SHUFFLE_PHASE_TIME=10
+  MERGE_PHASE_TIME=11
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000024 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000024 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:775
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_8_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000024/hive
+Tez task attempt finished: attempt_1792344698416_0001_8_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 566
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=4
+  MERGE_PHASE_TIME=4
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000025 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000025 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:822
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_9_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000025/hive
+Tez task attempt finished: attempt_1792344698416_0001_9_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 45
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6572
+  OUTPUT_BYTES_WITH_OVERHEAD=6097
+  OUTPUT_BYTES_PHYSICAL=6105
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000026 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000026 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:746
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_9_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000026/hive
+Tez task attempt finished: attempt_1792344698416_0001_9_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 569
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2286
+  SHUFFLE_BYTES=2286
+  SHUFFLE_BYTES_DECOMPRESSED=2282
+  SHUFFLE_BYTES_DISK_DIRECT=2286
+  SHUFFLE_PHASE_TIME=3
+  MERGE_PHASE_TIME=3
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000027 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000027 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:777
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_9_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000027/hive
+Tez task attempt finished: attempt_1792344698416_0001_9_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 140
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=10
+  MERGE_PHASE_TIME=11
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+
+Container: container_1792344698416_0001_00_000028 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000028 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:825
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_10_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000028/hive
+Tez task attempt finished: attempt_1792344698416_0001_10_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 114
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=101
+  INPUT_RECORDS_PROCESSED=4
+  INPUT_SPLIT_LENGTH_BYTES=1
+  OUTPUT_RECORDS=101
+  OUTPUT_BYTES=6568
+  OUTPUT_BYTES_WITH_OVERHEAD=6093
+  OUTPUT_BYTES_PHYSICAL=6101
+  SHUFFLE_CHUNK_COUNT=2
+  RECORDS_IN_Map_1=3
+  RECORDS_OUT_INTERMEDIATE_Map_1=101
+  RECORDS_OUT_OPERATOR_GBY_7=1
+  RECORDS_OUT_OPERATOR_RS_12=100
+  RECORDS_OUT_OPERATOR_RS_8=1
+  RECORDS_OUT_OPERATOR_SEL_1=1
+  RECORDS_OUT_OPERATOR_SEL_3=100
+  RECORDS_OUT_OPERATOR_SEL_6=100
+  RECORDS_OUT_OPERATOR_TS_0=1
+  RECORDS_OUT_OPERATOR_UDTF_2=100
+
+Container: container_1792344698416_0001_00_000029 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000029 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:748
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_10_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000029/hive
+Tez task attempt finished: attempt_1792344698416_0001_10_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 549
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=1
+  SPILLED_RECORDS=1
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=2282
+  SHUFFLE_BYTES=2282
+  SHUFFLE_BYTES_DECOMPRESSED=2278
+  SHUFFLE_BYTES_DISK_DIRECT=2282
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=1
+  RECORDS_OUT_OPERATOR_FS_19=1
+  RECORDS_OUT_OPERATOR_GBY_17=1
+  RECORDS_OUT_OPERATOR_SEL_18=1
+
+Container: container_1792344698416_0001_00_000030 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344698416_0001_00_000030 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:26 +0000 2026
+LogLength:777
+LogContents:
+Tez task attempt started: attempt_1792344698416_0001_10_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344698416_0001_00_000030/hive
+Tez task attempt finished: attempt_1792344698416_0001_10_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 627
+Counters:
+  REDUCE_INPUT_GROUPS=1
+  REDUCE_INPUT_RECORDS=100
+  SPILLED_RECORDS=100
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=3819
+  SHUFFLE_BYTES=3819
+  SHUFFLE_BYTES_DECOMPRESSED=3815
+  SHUFFLE_BYTES_DISK_DIRECT=3819
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=3
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  CREATED_FILES=1
+  RECORDS_OUT_1_default.ext_ice_orc=100
+  RECORDS_OUT_OPERATOR_FS_16=100
+  RECORDS_OUT_OPERATOR_SEL_15=100
+  TOTAL_TABLE_ROWS_WRITTEN=100
+

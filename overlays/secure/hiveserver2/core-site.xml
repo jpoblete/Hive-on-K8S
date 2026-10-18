@@ -10,6 +10,10 @@
       <value>kerberos</value>
    </property>
    <property>
+      <name>hadoop.security.kerberos.use.canonical.hostname</name>
+      <value>true</value>
+   </property>
+   <property>
       <name>hadoop.security.authorization</name>
       <value>true</value>
    </property>
@@ -22,7 +26,24 @@
       <value>*</value>
    </property>
    <property>
+      <name>hadoop.proxyuser.hive.users</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hue.hosts</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hue.groups</name>
+      <value>*</value>
+   </property>
+   <property>
       <name>dfs.client.use.datanode.hostname</name>
       <value>true</value>
+   </property>
+   <!-- Tez local mode still requests HDFS delegation tokens; needs a renewer principal (no YARN RM in secure). -->
+   <property>
+      <name>yarn.resourcemanager.principal</name>
+      <value>__YARN_RM_PRINCIPAL__</value>
    </property>
 </configuration>

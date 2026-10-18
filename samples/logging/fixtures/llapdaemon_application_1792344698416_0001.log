@@ -1,0 +1,12 @@
+2026-10-18 17:32:10,123 INFO  [IPC Server handler 4 on default port 15002] llap.LlapDaemon: Received work request for application_1792344698416_0001 queryId=hive_20261018173210_abc123def456
+2026-10-18 17:32:10,456 INFO  [TezChild:1] exec.TezTask: Executing Fragment [0] for dag_1792344698416_0001_1 application_1792344698416_0001
+2026-10-18 17:32:10,789 INFO  [TezChild:1] exec.TezTask: Fragment [0] finished successfully for application_1792344698416_0001
+2026-10-18 17:32:11,012 INFO  [TezChild:2] exec.TezTask: Executing Fragment [1] for dag_1792344698416_0001_1 application_1792344698416_0001
+2026-10-18 17:32:11,345 WARN  [TezChild:2] exec.TezTask: Slow IO read on application_1792344698416_0001 fragment [1] took 1200ms
+2026-10-18 17:32:12,678 ERROR [TezChild:3] exec.TezTask: Query failed for application_1792344698416_0001 dag_1792344698416_0001_2
+2026-10-18 17:32:12,679 ERROR [TezChild:3] exec.TezTask: java.lang.RuntimeException: Simulated fragment failure for sample export
+2026-10-18 17:32:12,680 ERROR [TezChild:3] exec.TezTask: 	at org.apache.hadoop.hive.llap.tezplugins.LlapTaskSchedulerService.submitWork(LlapTaskSchedulerService.java:999)
+2026-10-18 17:32:12,681 ERROR [TezChild:3] exec.TezTask: 	at org.apache.tez.dag.app.dag.TaskAttemptImpl.run(TaskAttemptImpl.java:412)
+2026-10-18 17:32:12,682 ERROR [TezChild:3] exec.TezTask: Caused by: java.io.IOException: ORC stripe read timeout
+2026-10-18 17:32:12,683 ERROR [TezChild:3] exec.TezTask: 	at org.apache.orc.impl.RecordReaderImpl.nextBatch(RecordReaderImpl.java:288)
+2026-10-18 17:32:13,001 INFO  [IPC Server handler 7] llap.LlapDaemon: Work completed for application_1792344698416_0001 queryId=hive_20261018173210_abc123def456

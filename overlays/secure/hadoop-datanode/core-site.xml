@@ -17,4 +17,8 @@
       <name>dfs.client.use.datanode.hostname</name>
       <value>true</value>
    </property>
+   <property>
+      <name>hadoop.user.group.static.mapping.overrides</name>
+      <value>admin=supergroup;hadoop=supergroup;hive=supergroup</value>
+   </property>
 </configuration>

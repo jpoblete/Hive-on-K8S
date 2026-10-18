@@ -1,0 +1,40 @@
+# Excerpt: first ~45 lines of tez_application_1792344761427_0001.log
+# Source: HDFS .../secure/hiveserver2/hiveserver2-0.../tez/application_1792344761427_0001.log
+# Query: SELECT p1, count(*) ... order by p1 desc (Stage-1)
+
+Tez application application_1792344761427_0001 (local mode; synthesized yarn-logs layout)
+Tez AM tez_appattempt_1792344761427_0001_000000 (application_1792344761427_0001)
+DAG dag_1792344761427_0001_1 submitted: SELECT p1, count(*) f...... order by p1 desc (Stage-1)
+
+Container: container_1792344761427_0001_00_000001 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344761427_0001_00_000001 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:701
+LogContents:
+Tez task attempt started: attempt_1792344761427_0001_1_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344761427_0001_00_000001/hive
+Tez task attempt finished: attempt_1792344761427_0001_1_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 492
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=10
+  INPUT_RECORDS_PROCESSED=10
+  INPUT_SPLIT_LENGTH_BYTES=29167
+  OUTPUT_RECORDS=10
+  OUTPUT_BYTES=80
+  ...
+
+# Full file: samples/logging/tez_application_1792344761427_0001.log (129 lines)

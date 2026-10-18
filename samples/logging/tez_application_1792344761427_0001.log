@@ -1,0 +1,129 @@
+Tez application application_1792344761427_0001 (local mode; synthesized yarn-logs layout)
+Tez AM tez_appattempt_1792344761427_0001_000000 (application_1792344761427_0001)
+DAG dag_1792344761427_0001_1 submitted: SELECT p1, count(*) f...... order by p1 desc (Stage-1)
+
+Container: container_1792344761427_0001_00_000001 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344761427_0001_00_000001 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:701
+LogContents:
+Tez task attempt started: attempt_1792344761427_0001_1_00_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344761427_0001_00_000001/hive
+Tez task attempt finished: attempt_1792344761427_0001_1_00_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 492
+Counters:
+  RACK_LOCAL_TASKS=1
+  SPILLED_RECORDS=10
+  INPUT_RECORDS_PROCESSED=10
+  INPUT_SPLIT_LENGTH_BYTES=29167
+  OUTPUT_RECORDS=10
+  OUTPUT_BYTES=80
+  OUTPUT_BYTES_WITH_OVERHEAD=106
+  OUTPUT_BYTES_PHYSICAL=110
+  SHUFFLE_CHUNK_COUNT=1
+  RECORDS_IN_Map_1=1000
+  RECORDS_OUT_INTERMEDIATE_Map_1=10
+  RECORDS_OUT_OPERATOR_GBY_10=10
+  RECORDS_OUT_OPERATOR_RS_11=10
+  RECORDS_OUT_OPERATOR_SEL_9=1000
+  RECORDS_OUT_OPERATOR_TS_0=1000
+
+Container: container_1792344761427_0001_00_000002 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344761427_0001_00_000002 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:841
+LogContents:
+Tez task attempt started: attempt_1792344761427_0001_1_01_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344761427_0001_00_000002/hive
+Tez task attempt finished: attempt_1792344761427_0001_1_01_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 61
+Counters:
+  REDUCE_INPUT_GROUPS=10
+  REDUCE_INPUT_RECORDS=10
+  SPILLED_RECORDS=20
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  OUTPUT_RECORDS=10
+  OUTPUT_BYTES=80
+  OUTPUT_BYTES_WITH_OVERHEAD=106
+  OUTPUT_BYTES_PHYSICAL=110
+  ADDITIONAL_SPILLS_BYTES_READ=110
+  SHUFFLE_CHUNK_COUNT=1
+  SHUFFLE_BYTES=110
+  SHUFFLE_BYTES_DECOMPRESSED=106
+  SHUFFLE_BYTES_DISK_DIRECT=110
+  SHUFFLE_PHASE_TIME=3
+  MERGE_PHASE_TIME=4
+  FIRST_EVENT_RECEIVED=2
+  LAST_EVENT_RECEIVED=2
+  RECORDS_OUT_INTERMEDIATE_Reducer_2=10
+  RECORDS_OUT_OPERATOR_GBY_12=10
+  RECORDS_OUT_OPERATOR_RS_13=10
+
+Container: container_1792344761427_0001_00_000003 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:stdout
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:1
+LogContents:
+
+
+
+Container: container_1792344761427_0001_00_000003 on hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:8042
+LogAggregationType: LOCAL
+============================================================
+LogType:syslog
+LogLastModifiedTime:Sun Oct 18 17:32:44 +0000 2026
+LogLength:715
+LogContents:
+Tez task attempt started: attempt_1792344761427_0001_1_02_000000_0
+NM logs URL (local mode): 127.0.0.1:0/node/containerlogs/container_1792344761427_0001_00_000003/hive
+Tez task attempt finished: attempt_1792344761427_0001_1_02_000000_0
+Status: SUCCEEDED
+timeTaken(ms): 99
+Counters:
+  REDUCE_INPUT_GROUPS=10
+  REDUCE_INPUT_RECORDS=10
+  SPILLED_RECORDS=10
+  NUM_SHUFFLED_INPUTS=1
+  MERGED_MAP_OUTPUTS=1
+  ADDITIONAL_SPILLS_BYTES_READ=110
+  SHUFFLE_BYTES=110
+  SHUFFLE_BYTES_DECOMPRESSED=106
+  SHUFFLE_BYTES_DISK_DIRECT=110
+  SHUFFLE_PHASE_TIME=2
+  MERGE_PHASE_TIME=2
+  FIRST_EVENT_RECEIVED=1
+  LAST_EVENT_RECEIVED=1
+  CREATED_FILES=1
+  RECORDS_OUT_0=10
+  RECORDS_OUT_OPERATOR_FS_15=10
+  RECORDS_OUT_OPERATOR_SEL_14=10
+

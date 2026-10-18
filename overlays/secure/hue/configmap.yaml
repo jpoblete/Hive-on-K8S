@@ -34,6 +34,8 @@ data:
     [ "${HUE_KERBEROS:-0}" = "1" ] || exit 0
     pod="${POD_NAME:-hue-0}"
     realm="${KRB5_REALM:-SECURE.LAB}"
+    kt_dir="/usr/share/hue/desktop/conf"
+    src="/var/kerberos/incoming/${pod}.keytab"
     host="$(hostname -f)"
     case "${host}" in
       *.${KUBERNETES_CLUSTER_DOMAIN:-svc.cluster.local}) ;;
@@ -41,36 +43,48 @@ data:
         host="${pod}.hue-headless.secure.svc.cluster.local"
         ;;
     esac
-    kt_dir="/usr/share/hue/desktop/conf"
-    src="/var/kerberos/incoming/${pod}.keytab"
+    if [ "$(id -u)" = "0" ]; then
+      pod_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+      short="$(hostname -s)"
+      if [ -n "${pod_ip}" ] && ! grep -q "[[:space:]]${host}[[:space:]]" /etc/hosts 2>/dev/null; then
+        echo "${pod_ip} ${host} ${short}" >> /etc/hosts
+      fi
+    fi
     export HUE_KEYTAB_PATH="${kt_dir}/hue.service.keytab"
     export HUE_KERBEROS_PRINCIPAL="hue/${host}@${realm}"
     export HS2_KERBEROS_HOST="${HS2_KERBEROS_HOST:-hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local}"
-    if [ -f "${HUE_KEYTAB_PATH}" ]; then
-      kinit -kt "${HUE_KEYTAB_PATH}" "${HUE_KERBEROS_PRINCIPAL}"
-      exit 0
+    export HDFS_NN_HOST="${HDFS_NN_HOST:-nameservice.secure.svc.cluster.local}"
+    export KRB5CCNAME="${kt_dir}/krb5cc"
+    if [ ! -f "${HUE_KEYTAB_PATH}" ]; then
+      [ "$(id -u)" = "0" ] || { echo "missing ${HUE_KEYTAB_PATH} and not root"; exit 1; }
+      [ -f "${src}" ] || { echo "missing Kerberos keytab ${src}"; exit 1; }
+      install -o 1001 -g 1000 -m 400 "${src}" "${HUE_KEYTAB_PATH}"
     fi
-    [ "$(id -u)" = "0" ] || { echo "missing ${HUE_KEYTAB_PATH} and not root"; exit 1; }
-    [ -f "${src}" ] || { echo "missing Kerberos keytab ${src}"; exit 1; }
-    install -o 1001 -g 1000 -m 400 "${src}" "${HUE_KEYTAB_PATH}"
     kinit -kt "${HUE_KEYTAB_PATH}" "${HUE_KERBEROS_PRINCIPAL}"
+    touch "${KRB5CCNAME}"
+    chown 1001:1000 "${KRB5CCNAME}" "${HUE_KEYTAB_PATH}" 2>/dev/null || true
+    chmod 600 "${KRB5CCNAME}" 2>/dev/null || true
   render-hue-ini.sh: |
     #!/bin/bash
     set -euo pipefail
     conf_dir="/usr/share/hue/desktop/conf"
     mkdir -p "${conf_dir}"
-    /config/setup-hue-kerberos.sh || exit 1
-    host="$(hostname -f)"
+    # shellcheck source=/config/setup-hue-kerberos.sh
+    . /config/setup-hue-kerberos.sh || exit 1
+    host="${HUE_KERBEROS_PRINCIPAL#hue/}"
+    host="${host%@*}"
     realm="${KRB5_REALM:-SECURE.LAB}"
     export HUE_KEYTAB_PATH="${HUE_KEYTAB_PATH:-/usr/share/hue/desktop/conf/hue.service.keytab}"
     export HUE_KERBEROS_PRINCIPAL="${HUE_KERBEROS_PRINCIPAL:-hue/${host}@${realm}}"
     export HS2_KERBEROS_HOST="${HS2_KERBEROS_HOST:-hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local}"
+    export HDFS_NN_HOST="${HDFS_NN_HOST:-nameservice.secure.svc.cluster.local}"
     sed \
       -e "s|__HUE_MYSQL_PASSWORD__|${HUE_MYSQL_PASSWORD}|g" \
       -e "s|__HUE_SECRET_KEY__|${HUE_SECRET_KEY}|g" \
       -e "s|__HUE_KEYTAB__|${HUE_KEYTAB_PATH:-/var/lib/hue/kerberos/hue.service.keytab}|g" \
       -e "s|__HUE_KERBEROS_PRINCIPAL__|${HUE_KERBEROS_PRINCIPAL}|g" \
       -e "s|__HS2_HOST__|${HS2_KERBEROS_HOST:-hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local}|g" \
+      -e "s|__HDFS_NN_HOST__|${HDFS_NN_HOST:-nameservice.secure.svc.cluster.local}|g" \
       /config/hue.ini.template > "${conf_dir}/hue.ini"
     if [ "$(id -u)" = "0" ]; then
       chown 1001:1000 "${conf_dir}/hue.ini" "${HUE_KEYTAB_PATH}" 2>/dev/null || true
@@ -86,9 +100,7 @@ data:
     set -euo pipefail
     # startup.sh runs migrate then supervisor; migrate leaves a supervisor that
     # Gunicorn cleanup kills. Schema is migrated in init; run supervisor only.
-    if [ "${HUE_KERBEROS:-0}" = "1" ] && [ -f /usr/share/hue/desktop/conf/hue.service.keytab ]; then
-      kinit -kt /usr/share/hue/desktop/conf/hue.service.keytab "hue/$(hostname -f)@${KRB5_REALM:-SECURE.LAB}" || true
-    fi
+    export KRB5CCNAME=/usr/share/hue/desktop/conf/krb5cc
     /config/render-hue-ini.sh
     cd /usr/share/hue
     exec ./build/env/bin/supervisor
@@ -116,13 +128,24 @@ data:
     password=__HUE_MYSQL_PASSWORD__
     name=hue
 
+    [hadoop]
+    [[hdfs_clusters]]
+    [[[default]]]
+    fs_defaultfs=hdfs://nameservice:8020
+    webhdfs_url=https://__HDFS_NN_HOST__:9871/webhdfs/v1
+    ssl_cert_ca_verify=false
+    security_enabled=true
+    mechanism=GSSAPI
+    supergroup=supergroup
+    home_dir=/user/admin
+
     [beeswax]
     hive_server_host=__HS2_HOST__
     hive_server_port=10000
     hive_conf_dir=/usr/share/hue/desktop/conf/hive
     security_enabled=true
     use_sasl=true
-    auth_username=hue
+    mechanism=GSSAPI
     server_conn_timeout=120
     list_partitions_limit=10000
     close_queries=open

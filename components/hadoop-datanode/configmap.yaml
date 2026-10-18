@@ -167,7 +167,9 @@ data:
       sed -i \
         -e "s|0.0.0.0:9866|${dn_host}:9866|g" \
         -e "s|0.0.0.0:9864|${dn_host}:9864|g" \
+        -e "s|0.0.0.0:9865|${dn_host}:9865|g" \
         -e "s|0.0.0.0:9867|${dn_host}:9867|g" \
+        -e "s|HTTP/_HOST@|HTTP/${dn_host}@|g" \
         "${HADOOP_HOME}/etc/hadoop/hdfs-site.xml"
     fi
     # shellcheck source=/dev/null

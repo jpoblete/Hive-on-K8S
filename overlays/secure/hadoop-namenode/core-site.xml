@@ -22,7 +22,24 @@
       <value>*</value>
    </property>
    <property>
+      <name>hadoop.proxyuser.hue.hosts</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hue.groups</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hue.users</name>
+      <value>*</value>
+   </property>
+   <property>
       <name>dfs.client.use.datanode.hostname</name>
       <value>true</value>
+   </property>
+   <!-- Lab admin (Hue login / kinit admin/admin@) is HDFS superuser via supergroup. -->
+   <property>
+      <name>hadoop.user.group.static.mapping.overrides</name>
+      <value>admin=supergroup;hadoop=supergroup;hive=supergroup</value>
    </property>
 </configuration>

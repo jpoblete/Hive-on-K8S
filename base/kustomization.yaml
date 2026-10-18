@@ -12,6 +12,10 @@ configMapGenerator:
     files:
       - createTable.sh=createTable.sh
       - hdfs-log-sync.sh=hdfs-log-sync.sh
+      - tez-history-yarn-logs.awk=tez-history-yarn-logs.awk
+      - tez-hs2-slice.awk=tez-hs2-slice.awk
+      - llap-query-slice.awk=llap-query-slice.awk
+      - llap-query-yarn-logs.awk=llap-query-yarn-logs.awk
 generatorOptions:
   disableNameSuffixHash: true
 #EOF  

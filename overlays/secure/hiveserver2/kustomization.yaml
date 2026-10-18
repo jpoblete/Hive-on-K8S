@@ -11,6 +11,7 @@ resources:
 #
 patches:
   - path: kerberos-mounts.yaml
+  - path: probes-kerberos.yaml
   - patch: |-
       - op: replace
         path: /metadata/name
@@ -67,6 +68,14 @@ patches:
       name: hivemetastore
 
   - patch: |-
+      - op: add
+        path: /spec/template/spec/setHostnameAsFQDN
+        value: true
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+
+  - patch: |-
       - op: replace
         path: /spec/template/spec/containers/0/env
         value:
@@ -111,25 +120,39 @@ patches:
             value: "1"
           - name: KRB5_REALM
             value: SECURE.LAB
+          - name: HIVE_LOG_HDFS_BASE
+            value: "hdfs://nameservice:8020/user/hive/logs/secure"
+          - name: HIVE_LOG_HDFS_SYNC_INTERVAL_SEC
+            value: "300"
     target:
       kind: StatefulSet
       name: hivemetastore
 
   - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/startupProbe/tcpSocket/port
-        value: 10000
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 90
     target:
       kind: StatefulSet
       name: hivemetastore
 
   - patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/readinessProbe/tcpSocket/port
-        value: 10000
+      - op: add
+        path: /spec/template/spec/containers/0/lifecycle
+        value:
+          preStop:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  if [ -n "${HIVE_LOG_HDFS_BASE:-}" ] && [ -f /opt/hive/bin/hdfs-log-sync.sh ]; then
+                    su -s /bin/bash hive -c '/opt/hive/bin/hdfs-log-sync.sh push' || true
+                  fi
     target:
       kind: StatefulSet
       name: hivemetastore
+
 #
 # Service
 #

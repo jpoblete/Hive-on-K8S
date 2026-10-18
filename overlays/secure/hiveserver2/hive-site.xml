@@ -99,6 +99,19 @@
          <name>tez.local.mode</name>
          <value>true</value>
       </property>
+      <!-- TEZ-4236: in-process AM status/DAG control; avoids Kerberos RPC to DAGClientRPCServer in same JVM. -->
+      <property>
+         <name>tez.local.mode.without.network</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.server2.tez.initialize.default.sessions</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.server2.tez.sessions.per.default.queue</name>
+         <value>1</value>
+      </property>
       <property>
          <name>tez.runtime.optimize.local.fetch</name>
          <value>true</value>
@@ -110,5 +123,23 @@
       <property>
          <name>hive.tez.exec.print.summary</name>
          <value>true</value>
+      </property>
+      <!-- Collect NN delegation tokens for Tez local (TEZ-4032-style) on nameservice. -->
+      <property>
+         <name>mapreduce.job.hdfs-servers</name>
+         <value>hdfs://nameservice</value>
+      </property>
+      <property>
+         <name>tez.session.am.dag.submit.timeout.secs</name>
+         <value>120</value>
+      </property>
+      <property>
+         <name>tez.am.client.am.wait.timeout-ms</name>
+         <value>120000</value>
+      </property>
+      <!-- Keep Tez scratch until log sync can read ATS history (local + HDFS scratch). -->
+      <property>
+         <name>tez.am.staging-scratch-data.auto-delete</name>
+         <value>false</value>
       </property>
 </configuration>

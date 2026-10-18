@@ -7,6 +7,6 @@
    </property>
    <property>
       <name>hive.server2.authentication.kerberos.principal</name>
-      <value>hive/_HOST@SECURE.LAB</value>
+      <value>hive/hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local@SECURE.LAB</value>
    </property>
 </configuration>

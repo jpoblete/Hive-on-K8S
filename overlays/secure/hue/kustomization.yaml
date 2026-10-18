@@ -14,3 +14,11 @@ configMapGenerator:
       disableNameSuffixHash: true
     files:
       - hive-site.xml=hive-site.xml
+patches:
+  - target:
+      kind: StatefulSet
+      name: hue
+    patch: |-
+      - op: add
+        path: /spec/template/spec/setHostnameAsFQDN
+        value: true

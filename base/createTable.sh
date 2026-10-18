@@ -20,10 +20,24 @@ HQL_FILE="/tmp/createTable.${TIMESTAMP}.hql"
 BEELINE_URL="${BEELINE_URL:-jdbc:hive2://$(hostname -f):10000/default}"
 BEELINE_USER="${BEELINE_USER:-hive}"
 BEELINE_PASSWORD="${BEELINE_PASSWORD:-}"
+BEELINE_LOG="${HQL_FILE}.beeline.log"
+
+# Refresh Kerberos credentials for Beeline (keytab must match KDC; resync after KDC v3 upgrade).
+kinitHiveForBeeline() {
+   local fqdn realm keytab
+
+   keytab="${KRB5_KTNAME:-/home/hive/host-service.keytab}"
+   [ -f "${keytab}" ] || return 0
+
+   fqdn="$(hostname -f)"
+   realm="${KRB5_REALM:-SECURE.LAB}"
+   kinit -kt "${keytab}" "hive/${fqdn}@${realm}"
+}
 
 # Print command usage and describe each positional argument.
 usage() {
    echo "createTable.sh table_type table_name cols_number part_number rows partitions"
+   echo "Set CREATE_TABLE_VERBOSE=1 to print generated HQL to stdout before Beeline runs."
    echo "table_type  : ${TYPES}"
    echo "table_name  : Hive table name, for example dummy_3_1 or db.dummy_3_1"
    echo "cols_number : number of columns, minimum 2"
@@ -110,6 +124,11 @@ createDatabase() {
    esac
 }
 
+# Drop an existing table so CREATE is not a silent IF NOT EXISTS no-op on broken Iceberg state.
+dropTbl() {
+   printf "DROP TABLE IF EXISTS %s PURGE;\n" "${TBL_NAME}"
+}
+
 # Generate the CREATE TABLE statement.
 # Chooses external/managed table behavior and storage format from TBL_TYPE.
 createTbl() {
@@ -164,7 +183,10 @@ createTbl() {
       printf " PARTITIONED BY ( %s )" "$(join_by ", " "${partitions[@]}")"
    fi
 
-   printf " CLUSTERED BY (c1) SORTED BY (c1 ASC) INTO 128 BUCKETS"
+   case "${TBL_TYPE}" in
+      ice_orc|ice_prq) ;;
+      *) printf " CLUSTERED BY (c1) SORTED BY (c1 ASC) INTO 128 BUCKETS" ;;
+   esac
 
    if [ -n "${storage_clause}" ]; then
       printf " %s" "${storage_clause}"
@@ -238,6 +260,7 @@ main() {
    local i
 
    createDatabase
+   dropTbl
    createTbl
 
    for ((i=1; i<=ITERATIONS; i++)); do
@@ -247,6 +270,33 @@ main() {
 
 # Validated outside the pipeline: there, die would only exit the pipeline's subshell
 validate_args
-main | tee "${HQL_FILE}" || exit 1
+main > "${HQL_FILE}" || exit 1
+if [ "${CREATE_TABLE_VERBOSE:-0}" = "1" ]; then
+   cat "${HQL_FILE}"
+fi
+
+kinitHiveForBeeline || die "Kerberos kinit failed (stale keytab?). On secure: HIVECTL_KRB5_RESYNC_KEYTABS=1 ./hiveCtl.sh start secure && ./hiveCtl.sh restart secure hiveserver2"
+
+# Hive 4.2 / JLine 3.x tries FfmTerminalProvider on a real TTY (needs --enable-preview). script(1) makes
+# bin/hive treat the client as non-interactive and sets -Djline.terminal=jline.UnsupportedTerminal.
+runBeelineBatch() {
+   local beeline_cmd keytab="${KRB5_KTNAME:-/home/hive/host-service.keytab}"
+   if [ -f "${keytab}" ] && [[ "${BEELINE_URL}" == *principal=* ]]; then
+      beeline_cmd=$(printf 'beeline -u %q --silent=true --showHeader=false -e %q' \
+         "${BEELINE_URL}" "!run ${HQL_FILE}")
+   else
+      beeline_cmd=$(printf 'beeline -u %q -n %q -p %q --silent=true --showHeader=false -e %q' \
+         "${BEELINE_URL}" "${BEELINE_USER}" "${BEELINE_PASSWORD}" "!run ${HQL_FILE}")
+   fi
+   script -qefc "${beeline_cmd}" /dev/null
+}
+
 # Not -f: Beeline 4.2.0 reads that file through JLine and can drop its last statement; !run reads the whole file first
-beeline -u "${BEELINE_URL}" -n "${BEELINE_USER}" -p "${BEELINE_PASSWORD}" -e "!run ${HQL_FILE}"
+if runBeelineBatch >"${BEELINE_LOG}" 2>&1; then
+   echo "createTable: OK (${TBL_NAME})"
+   [ "${CREATE_TABLE_VERBOSE:-0}" = "1" ] && cat "${BEELINE_LOG}"
+   exit 0
+fi
+
+grep -vE '^SLF4J:' "${BEELINE_LOG}" >&2
+exit 1

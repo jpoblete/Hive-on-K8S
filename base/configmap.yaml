@@ -132,6 +132,8 @@ data:
     
     # Hive Configuration Directory can be controlled by:
     export HIVE_CONF_DIR=/opt/hive/conf
+    # HS2/Metastore JVM must not use stock $HADOOP_HOME/etc/hadoop (empty hdfs-site on Kerberos).
+    export HADOOP_CONF_DIR=/opt/hive/conf
     
     # Folder containing extra libraries required for hive compilation/execution can be controlled by:
     # export HIVE_AUX_JARS_PATH=
@@ -172,7 +174,11 @@ data:
     #
     if [ "$SERVICE" = "hiveserver2" ]; then
        hive_log_file="${SERVICE}-$(hostname -f)-$(date +%s).log"
-       export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS -Dhive.log.dir=$HIVE_LOG_DIR \
+       # Tez local AM RPC runs off the HS2 handler thread; allow keytab login user on IPC (not only Subject-bound creds).
+       hs2_krb_opts=""
+       [ "${HIVE_KERBEROS:-0}" = "1" ] && hs2_krb_opts="-Djavax.security.auth.useSubjectCredsOnly=false "
+       export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS ${hs2_krb_opts}-Dhadoop.security.kerberos.use.canonical.hostname=true \
+         -Dhive.log.dir=$HIVE_LOG_DIR \
          -Dhive.log.file=${hive_log_file} -Dlog4j.configurationFile=$HIVE_CONF_DIR/hive-log4j2.properties \
          -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HIVE_LOG_DIR \
          -Xlog:gc*=info:file=$HIVE_LOG_DIR/gc-${SERVICE}-%p-%t.log:time,uptime,level,tags:filecount=5,filesize=16M"
@@ -332,6 +338,18 @@ data:
        if [ -n "${HIVE_METASTORE_PASSWORD:-}" ]; then
           sed -i "s/__HIVE_METASTORE_PASSWORD__/${HIVE_METASTORE_PASSWORD}/g" "${HIVE_HOME}/conf/hive-site.xml"
        fi
+       if [ "${HIVE_KERBEROS:-0}" = "1" ] && [ "${SERVICE}" = "hiveserver2" ]; then
+          fqdn="$(hostname -f)"
+          short="$(hostname -s)"
+          realm="${KRB5_REALM:-SECURE.LAB}"
+          sed -i "s|__YARN_RM_PRINCIPAL__|hive/${fqdn}@${realm}|g" "${HIVE_HOME}/conf/core-site.xml"
+          # Tez local AM RPC uses java.net.InetAddress.getLocalHost() (kernel hostname). Must match kinit hive/<fqdn>@.
+          pod_ip="$(hostname -I | awk '{print $1}')"
+          hostname "${fqdn}" 2>/dev/null || true
+          if ! grep -q "[[:space:]]${fqdn}[[:space:]]" /etc/hosts; then
+             echo "${pod_ip} ${fqdn} ${short}" >> /etc/hosts
+          fi
+       fi
        configureHiveLlapIoEnabled || true
        if [ "${SERVICE}" = "hiveserver2" ] && [ -f "${HIVE_HOME}/setup/createTable.sh" ]; then
           cp "${HIVE_HOME}/setup/createTable.sh" "${HIVE_HOME}/bin/createTable.sh"
@@ -340,6 +358,18 @@ data:
        if [ -f "${HIVE_HOME}/setup/hdfs-log-sync.sh" ]; then
           cp "${HIVE_HOME}/setup/hdfs-log-sync.sh" "${HIVE_HOME}/bin/hdfs-log-sync.sh"
           chmod +x "${HIVE_HOME}/bin/hdfs-log-sync.sh"
+       fi
+       if [ -f "${HIVE_HOME}/setup/tez-history-yarn-logs.awk" ]; then
+          cp "${HIVE_HOME}/setup/tez-history-yarn-logs.awk" "${HIVE_HOME}/bin/tez-history-yarn-logs.awk"
+       fi
+       if [ -f "${HIVE_HOME}/setup/tez-hs2-slice.awk" ]; then
+          cp "${HIVE_HOME}/setup/tez-hs2-slice.awk" "${HIVE_HOME}/bin/tez-hs2-slice.awk"
+       fi
+       if [ -f "${HIVE_HOME}/setup/llap-query-slice.awk" ]; then
+          cp "${HIVE_HOME}/setup/llap-query-slice.awk" "${HIVE_HOME}/bin/llap-query-slice.awk"
+       fi
+       if [ -f "${HIVE_HOME}/setup/llap-query-yarn-logs.awk" ]; then
+          cp "${HIVE_HOME}/setup/llap-query-yarn-logs.awk" "${HIVE_HOME}/bin/llap-query-yarn-logs.awk"
        fi
        chown -R hive:hive /home/hive "${HIVE_HOME}" 2>/dev/null || true
        return 0
@@ -363,6 +393,8 @@ data:
        [ -z "${HIVE_HOME}"   ] && export HIVE_HOME=/opt/hive
        [ -z "${JAVA_HOME}"   ] && export JAVA_HOME=/opt/java/openjdk
        [ -z "${HADOOP_HOME}" ] && export HADOOP_HOME=/opt/hadoop
+       export HADOOP_CONF_DIR="${HADOOP_CONF_DIR:-/opt/hive/conf}"
+       export HIVE_CONF_DIR="${HIVE_CONF_DIR:-/opt/hive/conf}"
        cd "${HIVE_HOME}" || exit 1
        function kinitHiveServiceIfNeeded(){
           [ "${HIVE_KERBEROS:-0}" = "1" ] || return 0
@@ -372,7 +404,37 @@ data:
           [ -f /home/hive/host-service.keytab ] || { echo "missing /home/hive/host-service.keytab"; return 1; }
           kinit -kt /home/hive/host-service.keytab "hive/${fqdn}@${realm}"
        }
+       # HS2 resolves hive.metastore.uris at startup; wait for headless DNS before opening Thrift clients.
+       function waitForMetastoreDns(){
+          [ "${SERVICE}" = "hiveserver2" ] || return 0
+          local uris host attempt
+          uris="$(awk -F'[<>]' '/hive.metastore.uris/{getline; print $3; exit}' "${HIVE_HOME}/conf/hive-site.xml")"
+          [ -n "${uris}" ] || return 0
+          IFS=',' read -ra _uris <<< "${uris}"
+          for uri in "${_uris[@]}"; do
+             host="${uri#thrift://}"
+             host="${host%%:*}"
+             [ -n "${host}" ] || continue
+             for attempt in $(seq 1 120); do
+                getent hosts "${host}" >/dev/null && break
+                echo "waiting for metastore DNS: ${host} (${attempt}/120)"
+                sleep 2
+             done
+             getent hosts "${host}" >/dev/null || { echo "metastore DNS not ready: ${host}"; return 1; }
+          done
+       }
        kinitHiveServiceIfNeeded || exit 1
+       waitForMetastoreDns || exit 1
+       function cleanCorruptHiveJarCache(){
+          [ "${SERVICE}" = "hiveserver2" ] || return 0
+          local dir="/opt/hive/install_dir/hive/.hiveJars"
+          hdfs dfs -test -e "${dir}" 2>/dev/null || return 0
+          if hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>0 && $5==0 {found=1} END{exit !found}'; then
+             echo "Removing Tez jar cache with zero-byte stubs at ${dir}"
+             hdfs dfs -rm -r -f "${dir}" || true
+          fi
+       }
+       cleanCorruptHiveJarCache || true
        [ ! -d "${HIVE_HOME}/.local/bin" ] && mkdir -p "${HIVE_HOME}/.local/bin"
        env | awk '/_PORT/ && /=tcp:\/\// {gsub(/tcp:\/\/.*:/,"");print $0}' | while IFS= read -r i; do
            echo "Correcting: ${i}"
@@ -445,7 +507,7 @@ data:
     #
     if [ "$(whoami)" == "root" ]; then
        /opt/hive/setup/staging.sh || exit 1
-       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_KERBEROS=${HIVE_KERBEROS:-0}; export KRB5_REALM=${KRB5_REALM:-}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; /opt/hive/setup/start-hive.sh" - hive
+       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_KERBEROS=${HIVE_KERBEROS:-0}; export KRB5_REALM=${KRB5_REALM:-}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; export HIVE_LOG_HDFS_BASE=${HIVE_LOG_HDFS_BASE:-}; export HIVE_LOG_HDFS_SYNC_INTERVAL_SEC=${HIVE_LOG_HDFS_SYNC_INTERVAL_SEC:-300}; export HIVE_LOG_HDFS_HISTORY_MAX=${HIVE_LOG_HDFS_HISTORY_MAX:-10}; /opt/hive/setup/start-hive.sh" - hive
     else
        startHive
     fi

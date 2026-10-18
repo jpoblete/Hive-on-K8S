@@ -86,7 +86,7 @@ data:
       echo "Removing MIT Kerberos database on PVC (${REALM})"
       rm -f /var/lib/krb5kdc/stash /var/lib/krb5kdc/principal* /var/lib/krb5kdc/kadm5.*
       rm -f "${MARKER}" /var/lib/krb5kdc/keytabs/.lab-keytabs-hadoop-hive-admin
-      rm -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v1 /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2
+      rm -f /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v1 /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v2 /var/lib/krb5kdc/keytabs/.lab-host-keytabs-v3
       rm -f /var/lib/krb5kdc/keytabs/*.keytab
     }
 
@@ -194,7 +194,7 @@ data:
     set -euo pipefail
     REALM="${KRB5_REALM:-SECURE.LAB}"
     KEYTAB_DIR="/var/lib/krb5kdc/keytabs"
-    MARKER="${KEYTAB_DIR}/.lab-host-keytabs-v2"
+    MARKER="${KEYTAB_DIR}/.lab-host-keytabs-v3"
     HOSTS_FILE="/config/secure-lab-hosts.list"
 
     mkdir -p "${KEYTAB_DIR}"
@@ -204,21 +204,25 @@ data:
       local service="$2"
       local pod="$3"
       local princ="${service}/${host}@${REALM}"
+      local short_princ="${service}/${pod}@${REALM}"
       local http_princ="HTTP/${host}@${REALM}"
       local keytab="${KEYTAB_DIR}/${pod}.keytab"
       kadmin.local -q "addprinc -randkey ${princ}" 2>/dev/null || true
+      kadmin.local -q "addprinc -randkey ${short_princ}" 2>/dev/null || true
       kadmin.local -q "addprinc -randkey ${http_princ}" 2>/dev/null || true
       rm -f "${keytab}"
-      kadmin.local -q "ktadd -k ${keytab} ${princ} ${http_princ}"
+      # Tez local RPC uses the StatefulSet pod short name (hiveserver2-0), not only the headless FQDN.
+      kadmin.local -q "ktadd -k ${keytab} ${princ} ${short_princ} ${http_princ}"
       chmod 400 "${keytab}"
     }
 
     function sync_host_keytabs_from_list(){
+      local only_missing="${1:-1}"
       while IFS='|' read -r host service pod; do
         [ -n "${host}" ] || continue
         [[ "${host}" =~ ^# ]] && continue
         local keytab="${KEYTAB_DIR}/${pod}.keytab"
-        if [ ! -f "${keytab}" ]; then
+        if [ "${only_missing}" = "0" ] || [ ! -f "${keytab}" ]; then
           ensure_host_keytab "${host}" "${service}" "${pod}"
         fi
       done < "${HOSTS_FILE}"
@@ -226,12 +230,13 @@ data:
 
     if [ -f "${MARKER}" ]; then
       echo "Host keytabs marker present (${MARKER}); ensuring missing entries"
-      sync_host_keytabs_from_list
+      sync_host_keytabs_from_list 1
       ls -la "${KEYTAB_DIR}"
       exit 0
     fi
 
-    echo "Creating host-based principals for secure lab (${REALM})"
-    sync_host_keytabs_from_list
+    echo "Creating host-based principals for secure lab (${REALM}), v3 FQDN + pod short name"
+    sync_host_keytabs_from_list 0
+    rm -f "${KEYTAB_DIR}/.lab-host-keytabs-v1" "${KEYTAB_DIR}/.lab-host-keytabs-v2"
     date -Iseconds > "${MARKER}"
     ls -la "${KEYTAB_DIR}"
