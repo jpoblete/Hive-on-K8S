@@ -43,7 +43,7 @@ mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
 llap:         apache/hive:nightly (Hive Metastore x2, HiveServer2 x2, LLAP daemon x2)
               apache/hadoop:3.4.1, gethue/hue:latest
 secure:       apache/hive:nightly (same LLAP stack as llap: Metastore x2, HiveServer2 x2, LLAP daemon x2)
-              apache/hadoop:3.4.1 (NameNode + 3 DataNodes; Kerberos HDFS)
+              apache/hadoop:3.4.1 (HDFS: 1 NameNode + 3 DataNode StatefulSets; Kerberos; dfs.replication=3)
               debian:bookworm-slim (MIT KDC in krb5kdc-0)
               gethue/hue:latest (Hue → HS2 with SASL/Kerberos backend)
 ```
@@ -175,7 +175,7 @@ standalone  →  mini  →  llap  →  secure
 
 | | |
 |--|--|
-| **Adds (on top of `llap`-shaped Hive)** | MIT KDC, Kerberos HDFS (**1 NN + 3 DN**, `dfs.replication=3`); **Kerberos SASL ZooKeeper**; **LLAP×2, Hue, 2×** Metastore & HiveServer2 (same scale as **`llap`**, all Kerberos-enabled) |
+| **Adds (on top of `llap`-shaped Hive)** | MIT KDC; **HDFS with three DataNodes** (`hadoop-datanode-0/1/2`, one pod per worker, **`dfs.replication=3`**); **Kerberos SASL ZooKeeper**; **LLAP×2, Hue, 2×** Metastore & HiveServer2 (same scale as **`llap`**, all Kerberos-enabled) |
 | **Image** | `apache/hive:nightly` (see [Images by profile](#images-by-profile)) |
 | **Hive tier** | **2** Metastore · **2** HiveServer2 · **2** LLAP daemons (same as **`llap`**, Kerberos-enabled) |
 | **Stack** | `krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue` |
@@ -190,9 +190,9 @@ standalone  →  mini  →  llap  →  secure
 
 **Kerberos (summary):** realm **`SECURE.LAB`**, KDC pod **`krb5kdc-0`**, keytabs in Secret **`kerberos-keytabs`** (synced by `hiveCtl` from KDC PVC). Host principals **`hdfs/`**, **`hive/`**, **`hue/`** + FQDN; Tez local mode needs short-name principals (e.g. **`hive/hiveserver2-0@…`**). Resync after KDC changes: **`HIVECTL_KRB5_RESYNC_KEYTABS=1 ./hiveCtl.sh start secure`**.
 
-**HDFS:** Kerberos auth + **`dfs.data.transfer.protection=authentication`** on NN/DN; admin/backup via **`hadoop-namenode-0`** (not `hadoop-0`). Do not enable **`dfs.encrypt.data.transfer`** on the NameNode alone.
+**HDFS:** **Three DataNode pods** (`kubectl get pods -n secure -l app=hadoop-datanode` → **3/3**) back the **`nameservice`** nameservice with **`dfs.replication=3`**. Kerberos auth + **`dfs.data.transfer.protection=authentication`** on NN/DN; ops via **`hadoop-namenode-0`** (not the single **`hadoop-0`** pod used in **`mini`** / **`llap`**). Tez jar scratch under **`/opt/hive/install_dir/<pod>/hive/.hiveJars`** uses **`dfs.replication=1`** in HS2 bootstrap so small DN PVCs are not triple-replicated for cache files.
 
-**Hive:** Metastore SASL, **`hive.server2.authentication=KERBEROS`**, **`tez.local.mode=true`**, LLAP execution (**`hive.execution.mode=llap`**). **`hive.server2.tez.initialize.default.sessions=false`** (Tez sessions open on first query; see [docs/secure-profile.md](docs/secure-profile.md)). Per-pod **`hive.user.install.directory`** and startup **`.hiveJars`** seeding on HS2. Beeline: **`kinit`** then **`beeline -u "${BEELINE_URL}"`** inside an HS2 pod (ZK discovery + Kerberos).
+**Hive:** Metastore SASL, **`hive.server2.authentication=KERBEROS`**, **`tez.local.mode=true`**, LLAP execution (**`hive.execution.mode=llap`**). **`hive.server2.tez.initialize.default.sessions=true`** (same as **`llap`**: one Tez session per HS2 JVM for LLAP metrics + Kerberos local AM IPC). Per-pod **`hive.user.install.directory`** and minimal **`.hiveJars`** seed (**`HIVE_TEZ_JAR_SEED=minimal`**). Beeline: **`kinit`** then **`beeline -u "${BEELINE_URL}"`** inside an HS2 pod (ZK discovery + Kerberos).
 
 **Hue:** **`use_sasl=true`** to HS2; File Browser WebHDFS to **`nameservice:9870`** as **`hue/…`**. Literal HS2 principal in `hue-hive-conf/hive-site.xml` (not `hive/_HOST`).
 

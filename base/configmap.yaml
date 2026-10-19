@@ -172,16 +172,19 @@ data:
          -Xlog:gc*=info:file=$HIVE_LOG_DIR/gc-${SERVICE}-%p-%t.log:time,uptime,level,tags:filecount=5,filesize=16M"
     fi
     #
-    if [ "$SERVICE" = "hiveserver2" ]; then
+       if [ "$SERVICE" = "hiveserver2" ]; then
        hive_log_file="${SERVICE}-$(hostname -f)-$(date +%s).log"
        # Tez local AM RPC runs off the HS2 handler thread; allow keytab login user on IPC (not only Subject-bound creds).
        hs2_krb_opts=""
        [ "${HIVE_KERBEROS:-0}" = "1" ] && hs2_krb_opts="-Djavax.security.auth.useSubjectCredsOnly=false "
-       export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS ${hs2_krb_opts}-Dhadoop.security.kerberos.use.canonical.hostname=true \
+       hs2_jvm_common="${hs2_krb_opts}-Dhadoop.security.kerberos.use.canonical.hostname=true \
          -Dhive.log.dir=$HIVE_LOG_DIR \
          -Dhive.log.file=${hive_log_file} -Dlog4j.configurationFile=$HIVE_CONF_DIR/hive-log4j2.properties \
          -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HIVE_LOG_DIR \
          -Xlog:gc*=info:file=$HIVE_LOG_DIR/gc-${SERVICE}-%p-%t.log:time,uptime,level,tags:filecount=5,filesize=16M"
+       export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS ${hs2_jvm_common}"
+       # HiveServer2 daemon JVM reads HADOOP_OPTS (not only HADOOP_CLIENT_OPTS); Tez local AM IPC needs the same flags.
+       export HADOOP_OPTS="${HADOOP_OPTS} ${hs2_jvm_common}"
     fi
     #
     # runLlapDaemon.sh reads its settings only from the environment and, unlike bin/hive,
@@ -427,19 +430,62 @@ data:
        }
        kinitHiveServiceIfNeeded || exit 1
        waitForMetastoreDns || exit 1
+       function tezHiveJarCacheDir(){
+          echo "/opt/hive/install_dir/${POD_NAME:-hive}/hive/.hiveJars"
+       }
+       function prepareHadoopConfForHdfsCli(){
+          [ -n "${HADOOP_CONF_DIR:-}" ] || export HADOOP_CONF_DIR="${HIVE_CONF_DIR:-/opt/hive/conf}"
+          if [ ! -f "${HADOOP_CONF_DIR}/log4j.properties" ] && [ -f "${HIVE_HOME}/conf/hive-log4j2.properties" ]; then
+             ln -sf "${HIVE_HOME}/conf/hive-log4j2.properties" "${HADOOP_CONF_DIR}/log4j.properties"
+          fi
+       }
+       function tezJarSeedMode(){
+          if [ -n "${HIVE_TEZ_JAR_SEED:-}" ]; then
+             echo "${HIVE_TEZ_JAR_SEED}"
+             return 0
+          fi
+          [ "${HIVE_KERBEROS:-0}" = "1" ] && echo "minimal" || echo "full"
+       }
+       function listTezSeedJarCandidates(){
+          local mode jar
+          mode="$(tezJarSeedMode)"
+          [ "${mode}" = "off" ] && return 0
+          if [ "${mode}" = "full" ]; then
+             find "${HIVE_HOME}/lib" -maxdepth 1 -name '*.jar' -print 2>/dev/null
+             return 0
+          fi
+          for jar in "${HIVE_HOME}/lib/"*.jar; do
+             [ -f "${jar}" ] || continue
+             case "${jar##*/}" in
+                hive-beeline*-standalone.jar|hive-exec*.jar|hive-common*.jar|hive-service*.jar|hive-llap*.jar|tez-*.jar|hadoop-common*.jar|hadoop-auth*.jar|hadoop-hdfs*.jar|hadoop-mapreduce-client-core*.jar|protobuf-java*.jar|slf4j-api*.jar|log4j*.jar)
+                   echo "${jar}" ;;
+             esac
+          done
+       }
+       function countLocalHiveJars(){
+          listTezSeedJarCandidates | wc -l | tr -d ' '
+       }
+       function hdfsPutTezJar(){
+          local local_path="$1" dest="$2"
+          hdfs dfs -Ddfs.replication=1 -put -f "${local_path}" "${dest}"
+       }
        function cleanCorruptHiveJarCache(){
           [ "${SERVICE}" = "hiveserver2" ] || return 0
-          local dir="/opt/hive/install_dir/${POD_NAME:-hive}/hive/.hiveJars"
+          local dir
+          dir="$(tezHiveJarCacheDir)"
           hdfs dfs -test -e "${dir}" 2>/dev/null || return 0
-          if hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>0 && $5==0 {found=1} END{exit !found}'; then
+          if hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>1 && $5==0 {found=1} END{exit !found}'; then
              echo "Removing Tez jar cache with zero-byte stubs at ${dir}"
              hdfs dfs -rm -r -f "${dir}" || true
              return 0
           fi
-          # Partial uploads (common when Kind /var is full) leave wrong-size jars and block Tez (PathExists).
+          # Full per-jar size checks are correct but too slow on first HS2 start (~350 HDFS stats).
+          # Opt in with HIVE_JAR_CACHE_VALIDATE_MISMATCH=1 after suspected partial uploads.
+          [ "${HIVE_JAR_CACHE_VALIDATE_MISMATCH:-0}" = "1" ] || return 0
           local jar base hash remote remote_size local_path local_size
           while IFS= read -r remote; do
              [ -n "${remote}" ] || continue
+             [[ "${remote}" == *".seed-complete" ]] && continue
              jar="${remote##*/}"
              base="${jar%.jar}"
              hash="${base##*-}"
@@ -451,22 +497,49 @@ data:
              if [ "${remote_size}" != "${local_size}" ]; then
                 echo "Removing mismatched Tez jar on HDFS (${remote_size} vs ${local_size} bytes): ${remote}"
                 hdfs dfs -rm -f "${remote}" || true
+                hdfs dfs -rm -f "${dir}/.seed-complete" 2>/dev/null || true
              fi
           done < <(hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>1 {print $NF}')
        }
        function seedTezHiveJarsToHdfs(){
           [ "${SERVICE}" = "hiveserver2" ] || return 0
           [ -n "${POD_NAME:-}" ] || return 0
-          local dir="/opt/hive/install_dir/${POD_NAME}/hive/.hiveJars" jar base hash dest
-          echo "Pre-seeding Tez jar cache at ${dir}"
-          hdfs dfs -mkdir -p "${dir}" || return 1
-          for jar in "${HIVE_HOME}/lib/"*.jar; do
+          local mode dir jar base hash dest marker expected onhdfs listing
+          mode="$(tezJarSeedMode)"
+          [ "${mode}" = "off" ] && { echo "Tez jar HDFS seed disabled (HIVE_TEZ_JAR_SEED=off)"; return 0; }
+          prepareHadoopConfForHdfsCli
+          dir="$(tezHiveJarCacheDir)"
+          marker="${dir}/.seed-complete"
+          expected="$(countLocalHiveJars)"
+          [ "${expected}" -gt 0 ] || { echo "No Tez seed jar candidates (mode=${mode})"; return 0; }
+          if hdfs dfs -test -e "${marker}" 2>/dev/null; then
+             onhdfs="$(hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>1 && $NF !~ /\.seed-complete$/ {c++} END{print c+0}')"
+             if [ "${onhdfs}" = "${expected}" ]; then
+                echo "Tez jar cache already seeded at ${dir} (${onhdfs} jars, mode=${mode}); skipping upload"
+                return 0
+             fi
+             echo "Tez jar cache incomplete at ${dir} (${onhdfs}/${expected}, mode=${mode}); re-seeding"
+          else
+             echo "Pre-seeding Tez jar cache at ${dir} (${expected} jars, mode=${mode}, dfs.replication=1)"
+          fi
+          hdfs dfs -Ddfs.replication=1 -mkdir -p "${dir}" || return 1
+          listing="/tmp/tez-hivejars-listing.$$"
+          hdfs dfs -ls "${dir}" 2>/dev/null >"${listing}" || true
+          while IFS= read -r jar; do
              [ -f "${jar}" ] || continue
              hash="$(sha256sum "${jar}" | awk '{print $1}')"
              base="$(basename "${jar}" .jar)"
              dest="${dir}/${base}-${hash}.jar"
-             hdfs dfs -put -f "${jar}" "${dest}" || return 1
-          done
+             if awk -v d="${dest}" '$NF == d && $5 > 0 {found=1} END{exit !found}' "${listing}"; then
+                continue
+             fi
+             hdfsPutTezJar "${jar}" "${dest}" || return 1
+          done < <(listTezSeedJarCandidates)
+          rm -f "${listing}"
+          listing="/tmp/tez-seed-marker.$$"
+          printf '%s %s\n' "${mode}" "${expected}" >"${listing}"
+          hdfsPutTezJar "${listing}" "${marker}" || return 1
+          rm -f "${listing}"
        }
        if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ] \
           && grep -q '__HIVE_USER_INSTALL_DIR__' "${HIVE_CONF_DIR}/hive-site.xml" 2>/dev/null; then
@@ -481,7 +554,9 @@ data:
        fi
        cleanCorruptHiveJarCache || true
        if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ]; then
-          seedTezHiveJarsToHdfs || exit 1
+          if ! seedTezHiveJarsToHdfs; then
+             echo "WARNING: Tez jar HDFS seed failed; starting HiveServer2 anyway (Tez queries may fail until HDFS writes succeed). Check DN space and Kerberos HDFS access." >&2
+          fi
        fi
        [ ! -d "${HIVE_HOME}/.local/bin" ] && mkdir -p "${HIVE_HOME}/.local/bin"
        env | awk '/_PORT/ && /=tcp:\/\// {gsub(/tcp:\/\/.*:/,"");print $0}' | while IFS= read -r i; do
@@ -512,10 +587,11 @@ data:
           echo "Initializing ${SERVICE^} schema as user: $(whoami)"
           "${HIVE_HOME}/bin/schematool" -dbType mysql -initOrUpgradeSchema
        fi
-       if [ "${SERVICE}" == "llapdaemon" ]; then
-          [ ! -e "${HIVE_HOME}/conf/llap-daemon-log4j2.properties" ] && cp "${HIVE_HOME}/conf/llap-daemon-log4j2.properties.template" "${HIVE_HOME}/conf/llap-daemon-log4j2.properties"
+       if [ "${SERVICE}" == "llapdaemon" ] || [ "${SERVICE}" == "hiveserver2" ]; then
+          [ "${SERVICE}" == "llapdaemon" ] && [ ! -e "${HIVE_HOME}/conf/llap-daemon-log4j2.properties" ] \
+             && cp "${HIVE_HOME}/conf/llap-daemon-log4j2.properties.template" "${HIVE_HOME}/conf/llap-daemon-log4j2.properties"
           # shellcheck source=/dev/null
-          . "${HIVE_HOME}/conf/hive-env.sh"
+          . "${HIVE_CONF_DIR}/hive-env.sh"
        fi
        #
        # Optional HDFS log archive (llap HiveServer2 / LLAP when HIVE_LOG_HDFS_BASE is set)

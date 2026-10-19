@@ -115,9 +115,23 @@
          <name>tez.local.mode</name>
          <value>true</value>
       </property>
+      <!-- Avoid Kerberos Hadoop IPC to the in-process Tez AM (HS2 already uses hive/<fqdn> keytab). -->
+      <property>
+         <name>tez.local.mode.without.network</name>
+         <value>true</value>
+      </property>
       <property>
          <name>hive.server2.tez.initialize.default.sessions</name>
-         <value>false</value>
+         <value>true</value>
+      </property>
+      <!-- Tez local AM + LLAP scheduler share the HS2 JVM; pass Kerberos IPC flags into the embedded AM (see llap overlay). -->
+      <property>
+         <name>tez.am.launch.cmd-opts</name>
+         <value>-Djavax.security.auth.useSubjectCredsOnly=false -Dhadoop.security.kerberos.use.canonical.hostname=true</value>
+      </property>
+      <property>
+         <name>hive.tez.java.opts</name>
+         <value>-Djavax.security.auth.useSubjectCredsOnly=false -Dhadoop.security.kerberos.use.canonical.hostname=true</value>
       </property>
       <property>
          <name>hive.server2.tez.default.queues</name>
@@ -146,6 +160,11 @@
       <property>
          <name>hive.llap.daemon.service.hosts</name>
          <value>@llap0</value>
+      </property>
+      <!-- Lab: Tez local AM submits unsigned fragments; LLAP defaults require signing (SecurityException). -->
+      <property>
+         <name>hive.llap.remote.token.requires.signing</name>
+         <value>false</value>
       </property>
       <property>
          <name>hive.zookeeper.quorum</name>

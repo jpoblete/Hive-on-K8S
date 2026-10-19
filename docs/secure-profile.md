@@ -13,7 +13,7 @@ For day-to-day commands, see [README.md](../README.md) (profiles, `hiveCtl`, smo
 | Hive auth | JDBC password | **Kerberos** (Metastore SASL, HS2 `KERBEROS`) |
 | ZK connect strings | `zookeeper.llap.svc.cluster.local:2181` | **`zookeeper-0.zookeeper.secure.svc.cluster.local:2181`** (pod FQDN) |
 | HS2 `hive.user.install.directory` | Shared `/opt/hive/install_dir` | **Per pod** `/opt/hive/install_dir/${POD_NAME}` |
-| Tez session at HS2 startup | `hive.server2.tez.initialize.default.sessions=true` | **`false`** (see [Tez sessions](#tez-sessions-at-hiveserver2-startup)) |
+| Tez session at HS2 startup | `hive.server2.tez.initialize.default.sessions=true` | **`true`** (same as **`llap`**; required for LLAP scheduler metrics + Tez local Kerberos IPC) |
 | Keytabs | N/A | Secret **`kerberos-keytabs`**, synced from KDC PVC via **`hiveCtl`** |
 
 Stack order: **`krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue`**.
@@ -52,15 +52,15 @@ HS2 IPC Kerberos uses **host keytabs v3**: each pod keytab includes **FQDN and s
 
 ## Tez sessions at HiveServer2 startup
 
-**Policy (intentional):** **`hive.server2.tez.initialize.default.sessions=false`** in `overlays/secure/hiveserver2/hive-site.xml`.
+**`hive.server2.tez.initialize.default.sessions=true`** in `overlays/secure/hiveserver2/hive-site.xml` (same as **`llap`**).
 
 | Setting | `llap` | `secure` |
 |---------|--------|----------|
-| `hive.server2.tez.initialize.default.sessions` | `true` | **`false`** |
+| `hive.server2.tez.initialize.default.sessions` | `true` | **`true`** |
 
-**Why:** Eager Tez pool init at startup was failing while HDFS **`.hiveJars`** caches were corrupt or incomplete (often when Kind **`/var`** is full). With **`false`**, HS2 becomes Ready on probes; Tez opens sessions **on first query**.
+**Why:** In Tez local mode the LLAP task scheduler registers **JvmMetrics** once per HiveServer2 JVM. Opening a **second** Tez session on the same pod (typical when **`false`**) fails with *metrics already initialized* and **`TezSession has already shutdown`**. A **single** session opened at HS2 startup (after **`kinit`** and minimal **`.hiveJars`** seed) matches **`llap`** behavior.
 
-**Trade-off:** First query pays session + jar localization cost; you must ensure **per-pod** jar caches are healthy (below).
+**Kerberos IPC:** **`HADOOP_OPTS`** / **`HADOOP_CLIENT_OPTS`** and **`tez.am.launch.cmd-opts`** set **`-Djavax.security.auth.useSubjectCredsOnly=false`** so the Tez AM RPC client can use the **`hive/<fqdn>`** keytab login user.
 
 ## Per-pod install dir and Tez jar cache (`.hiveJars`)
 
@@ -69,8 +69,8 @@ Two HS2 pods must not share one HDFS **`/opt/hive/install_dir/hive/.hiveJars`** 
 **Overlay:** `hive.user.install.directory` = **`__HIVE_USER_INSTALL_DIR__`** → substituted at startup to **`/opt/hive/install_dir/${POD_NAME}`** (`base/configmap.yaml` **`start-hive.sh`**):
 
 1. Copy config to **`/opt/hive/conf-runtime`** and rewrite the placeholder.
-2. **`cleanCorruptHiveJarCache`** — remove zero-byte or **size-mismatch** JARs under that pod’s **`.hiveJars`**.
-3. **`seedTezHiveJarsToHdfs`** — **`hdfs dfs -put -f`** every **`/opt/hive/lib/*.jar`** as **`<basename>-<sha256>.jar`** (matches Tez `DagUtils` naming).
+2. **`cleanCorruptHiveJarCache`** — remove the cache if any **zero-byte** JAR exists (fast). Full **size-mismatch** scan is opt-in: **`HIVE_JAR_CACHE_VALIDATE_MISMATCH=1`** (slow; ~350 HDFS stats).
+3. **`seedTezHiveJarsToHdfs`** — uploads Tez/LLAP-related jars ( **`HIVE_TEZ_JAR_SEED=minimal`** on **`secure`**, or **`full`** / **`off`**) with **`dfs.replication=1`**, then **`.seed-complete`**. Seed failure logs a **warning** and HS2 still starts (no CrashLoop from HDFS full). If the marker exists and jar **count** matches, upload is **skipped**.
 4. Start HS2 with **`--hiveconf hive.user.install.directory=/opt/hive/install_dir/${POD_NAME}`**.
 
 Requires **`POD_NAME`** in the HS2 StatefulSet (`overlays/secure/hiveserver2/kustomization.yaml`).

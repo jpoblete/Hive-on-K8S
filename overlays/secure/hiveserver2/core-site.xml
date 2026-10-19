@@ -41,6 +41,10 @@
       <name>dfs.client.use.datanode.hostname</name>
       <value>true</value>
    </property>
+   <property>
+      <name>hadoop.rpc.protection</name>
+      <value>authentication</value>
+   </property>
    <!-- Tez local mode still requests HDFS delegation tokens; needs a renewer principal (no YARN RM in secure). -->
    <property>
       <name>yarn.resourcemanager.principal</name>

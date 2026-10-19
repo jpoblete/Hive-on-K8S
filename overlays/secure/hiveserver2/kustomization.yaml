@@ -130,6 +130,8 @@ patches:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.name
+          - name: HIVE_TEZ_JAR_SEED
+            value: "minimal"
           - name: HIVE_KERBEROS
             value: "1"
           - name: KRB5_REALM

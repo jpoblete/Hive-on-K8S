@@ -141,6 +141,10 @@
          <value>@llap0</value>
       </property>
       <property>
+         <name>hive.llap.remote.token.requires.signing</name>
+         <value>false</value>
+      </property>
+      <property>
          <name>hive.zookeeper.quorum</name>
          <value>zookeeper-0.zookeeper.secure.svc.cluster.local:2181</value>
       </property>
