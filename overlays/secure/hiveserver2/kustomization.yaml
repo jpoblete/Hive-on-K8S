@@ -61,6 +61,20 @@ patches:
       name: hivemetastore
   - patch: |-
       - op: add
+        path: /spec/podManagementPolicy
+        value: Parallel
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: apache/hive:nightly
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
         path: /spec/serviceName
         value: hiveserver2-headless
     target:
@@ -82,7 +96,7 @@ patches:
           - name: SERVICE
             value: "hiveserver2"
           - name: BEELINE_URL
-            value: "jdbc:hive2://hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local:10000/default;principal=hive/hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local@SECURE.LAB"
+            value: "jdbc:hive2://zookeeper.secure.svc.cluster.local:2181/default;serviceDiscoveryMode=zooKeeper;zooKeeperNamespace=hiveserver2;auth=KERBEROS;principal=hive/_HOST@SECURE.LAB"
           - name: ROOT_PASSWORD
             valueFrom:
               secretKeyRef:

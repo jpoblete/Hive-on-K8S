@@ -40,6 +40,30 @@
          <value>true</value>
       </property>
       <property>
+         <name>hive.llap.daemon.service.principal</name>
+         <value>hive/_HOST@SECURE.LAB</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.keytab.file</name>
+         <value>/home/hive/host-service.keytab</value>
+      </property>
+      <property>
+         <name>hive.llap.zk.sm.principal</name>
+         <value>hive/_HOST@SECURE.LAB</value>
+      </property>
+      <property>
+         <name>hive.llap.zk.sm.keytab.file</name>
+         <value>/home/hive/host-service.keytab</value>
+      </property>
+      <property>
+         <name>hive.llap.zk.sm.connectionString</name>
+         <value>zookeeper.secure.svc.cluster.local:2181</value>
+      </property>
+      <property>
+         <name>hive.cluster.delegation.token.store.zookeeper.connectString</name>
+         <value>zookeeper.secure.svc.cluster.local:2181</value>
+      </property>
+      <property>
          <name>javax.jdo.option.ConnectionURL</name>
          <value>jdbc:mysql://mysql.secure.svc.cluster.local:3306/hive?createDatabaseIfNotExist=true</value>
       </property>
@@ -90,5 +114,102 @@
       <property>
          <name>hive.tez.exec.print.summary</name>
          <value>true</value>
+      </property>
+      <!-- LLAP stack (modeled on overlays/llap; Tez AM in HS2, fragments on @llap0) -->
+      <property>
+         <name>hive.server2.tez.initialize.default.sessions</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.server2.tez.default.queues</name>
+         <value>default</value>
+      </property>
+      <property>
+         <name>hive.server2.tez.sessions.per.default.queue</name>
+         <value>1</value>
+      </property>
+      <property>
+         <name>hive.server2.tez.session.lifetime</name>
+         <value>0</value>
+      </property>
+      <property>
+         <name>hive.server2.tez.sessions.custom.queue.allowed</name>
+         <value>ignore</value>
+      </property>
+      <property>
+         <name>hive.execution.mode</name>
+         <value>llap</value>
+      </property>
+      <property>
+         <name>hive.llap.execution.mode</name>
+         <value>all</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.service.hosts</name>
+         <value>@llap0</value>
+      </property>
+      <property>
+         <name>hive.zookeeper.quorum</name>
+         <value>zookeeper.secure.svc.cluster.local:2181</value>
+      </property>
+      <property>
+         <name>hive.server2.support.dynamic.service.discovery</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.server2.zookeeper.namespace</name>
+         <value>hiveserver2</value>
+      </property>
+      <property>
+         <name>hive.llap.io.enabled</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.tez.container.size</name>
+         <value>1024</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.work.dirs</name>
+         <value>/opt/hive/llap/work</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.num.executors</name>
+         <value>2</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.memory.per.instance.mb</name>
+         <value>2048</value>
+      </property>
+      <property>
+         <name>hive.llap.io.memory.mode</name>
+         <value>cache</value>
+      </property>
+      <property>
+         <name>hive.llap.io.memory.size</name>
+         <value>1Gb</value>
+      </property>
+      <property>
+         <name>hive.llap.io.threadpool.size</name>
+         <value>2</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.rpc.port</name>
+         <value>15001</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.web.port</name>
+         <value>15002</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.output.service.port</name>
+         <value>15003</value>
+      </property>
+      <property>
+         <name>hive.llap.management.rpc.port</name>
+         <value>15004</value>
+      </property>
+      <property>
+         <name>hive.llap.daemon.yarn.shuffle.port</name>
+         <value>15551</value>
       </property>
 </configuration>

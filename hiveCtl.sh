@@ -43,7 +43,7 @@ function help(){
    echo "  Disable monitor: HIVECTL_HUE_PORT_FORWARD_MONITOR=0   Interval: HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL=60"
    echo "LLAP daemon UI: http://localhost:15002 after start llapdaemon (pod llapdaemon-0)"
    echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
-   echo "Profile secure: MIT KDC, NN + 3 DNs, Hive x2, Hue (./hiveCtl.sh start secure); Kerberos HDFS/Hive/Hue→HS2"
+   echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
    echo "Disk: before start/restore, hiveCtl checks Kind /var on all nodes (mini, llap, secure, standalone)"
    echo "  Prune when use exceeds threshold: HIVECTL_DISK_MAX_USE_PERCENT=90 (HIVECTL_DISK_CHECK=0 to skip)"
 }
@@ -516,7 +516,7 @@ function startOverlay(){
                case "${service}" in
                   krb5kdc)
                      ;;
-                  hadoop-namenode|hadoop-datanode|hivemetastore|hiveserver2)
+                  hadoop-namenode|hadoop-datanode|hivemetastore|hiveserver2|llapdaemon)
                      ensureKerberosKeytabSecret "${namespace}" || return 1
                      ;;
                esac
@@ -542,8 +542,8 @@ function startOverlay(){
    if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
       ensureHuePortForward "${namespace}" || true
    fi
-   if [ "${namespace}" = "llap" ] && [ "${service}" = "llapdaemon" ]; then
-      ensureLlapDaemonPortForward || true
+   if [ "${service}" = "llapdaemon" ]; then
+      case "${namespace}" in llap|secure) ensureLlapDaemonPortForward "${namespace}" || true ;; esac
    fi
 }
 # Stop one overlay/component while preserving PVCs.
@@ -583,8 +583,8 @@ function stopOverlay(){
    if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
       stopHuePortForward "${namespace}"
    fi
-   if [ "${namespace}" = "llap" ] && [ "${service}" = "llapdaemon" ]; then
-      stopLlapDaemonPortForward
+   if [ "${service}" = "llapdaemon" ]; then
+      case "${namespace}" in llap|secure) stopLlapDaemonPortForward "${namespace}" ;; esac
    fi
    resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
    # Not forced: each pod gets its termination grace period to shut its services down cleanly
@@ -825,16 +825,18 @@ function ensureHuePortForward(){
    return 1
 }
 function llapDaemonPortForwardPidFile(){
-   echo "$(hiveCtlStateDir)/llap-daemon-portforward.pid"
+   local namespace="${1:-llap}"
+   echo "$(hiveCtlStateDir)/${namespace}-llap-daemon-portforward.pid"
 }
 function llapDaemonLocalPort(){
    echo "${HIVECTL_LLAP_DAEMON_LOCAL_PORT:-15002}"
 }
 function stopLlapDaemonPortForward(){
+   local namespace="${1:-llap}"
    local pidfile=""
    local pid=""
 
-   pidfile="$(llapDaemonPortForwardPidFile)"
+   pidfile="$(llapDaemonPortForwardPidFile "${namespace}")"
    [ -f "${pidfile}" ] || return 0
    pid="$(cat "${pidfile}")"
    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
@@ -845,7 +847,7 @@ function stopLlapDaemonPortForward(){
 }
 # Expose llapdaemon-0 web UI on localhost:15002 (HIVECTL_LLAP_DAEMON_PORT_FORWARD=0 to disable).
 function ensureLlapDaemonPortForward(){
-   local namespace="llap"
+   local namespace="${1:-llap}"
    local port=""
    local mode=""
    local pidfile=""
@@ -865,13 +867,13 @@ function ensureLlapDaemonPortForward(){
    fi
 
    port="$(llapDaemonLocalPort)"
-   pidfile="$(llapDaemonPortForwardPidFile)"
+   pidfile="$(llapDaemonPortForwardPidFile "${namespace}")"
    mkdir -p "$(hiveCtlStateDir)"
 
    if [ -f "${pidfile}" ]; then
       pid="$(cat "${pidfile}")"
       if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-         echo "LLAP daemon UI: http://localhost:${port}/ (llapdaemon-0 port-forward pid ${pid})"
+         echo "LLAP daemon UI (${namespace}): http://localhost:${port}/ (llapdaemon-0 port-forward pid ${pid})"
          return 0
       fi
       rm -f "${pidfile}"
@@ -897,11 +899,11 @@ function ensureLlapDaemonPortForward(){
    echo "${pid}" > "${pidfile}"
    sleep 1
    if kill -0 "${pid}" 2>/dev/null; then
-      echo "LLAP daemon UI: http://localhost:${port}/ (llapdaemon-0; pid ${pid}; stops on './hiveCtl.sh stop llap llapdaemon' or 'stop llap')"
+      echo "LLAP daemon UI (${namespace}): http://localhost:${port}/ (llapdaemon-0; pid ${pid}; stops on './hiveCtl.sh stop ${namespace} llapdaemon' or 'stop ${namespace}')"
       return 0
    fi
    rm -f "${pidfile}"
-   echo "Warning: could not bind localhost:${port} for LLAP daemon UI. Try: kubectl port-forward pod/llapdaemon-0 -n llap ${port}:15002" >&2
+   echo "Warning: could not bind localhost:${port} for LLAP daemon UI. Try: kubectl port-forward pod/llapdaemon-0 -n ${namespace} ${port}:15002" >&2
    return 1
 }
 # Summarize node CPU arch for llap (Hive pods auto-tune hive.llap.io.enabled at bootstrap).
@@ -1010,7 +1012,8 @@ function startStack(){
          ensureKrb5Secrets "${namespace}" || return 1
          ensureHueSecrets "${namespace}" || return 1
          ensureAdminSecrets "${namespace}" || return 1
-         components=(krb5kdc hadoop-namenode mysql hivemetastore hiveserver2 hue)
+         llapNodeArchSummary
+         components=(krb5kdc hadoop-namenode mysql zookeeper hivemetastore llapdaemon hiveserver2 hue)
          ;;
       *)
          components=(hadoop mysql hivemetastore hiveserver2)
@@ -1037,7 +1040,7 @@ function stopStack(){
          components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
          ;;
       secure)
-         components=(hue hiveserver2 hivemetastore mysql hadoop-namenode krb5kdc)
+         components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop-namenode krb5kdc)
          ;;
       *)
          components=(hiveserver2 hivemetastore mysql hadoop)

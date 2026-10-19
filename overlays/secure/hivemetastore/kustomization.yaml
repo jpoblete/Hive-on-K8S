@@ -27,6 +27,21 @@ patches:
       name: hivemetastore
   - patch: |-
       - op: add
+        path: /spec/podManagementPolicy
+        value: Parallel
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  # Same nightly tag as llap (Tez/LLAP fixes; see README Images by profile)
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: apache/hive:nightly
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
         path: /spec/serviceName
         value: hivemetastore-headless
     target:

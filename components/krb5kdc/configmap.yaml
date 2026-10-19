@@ -187,6 +187,8 @@ data:
     hivemetastore-1.hivemetastore-headless.secure.svc.cluster.local|hive|hivemetastore-1
     hiveserver2-0.hiveserver2-headless.secure.svc.cluster.local|hive|hiveserver2-0
     hiveserver2-1.hiveserver2-headless.secure.svc.cluster.local|hive|hiveserver2-1
+    llapdaemon-0.llapdaemon.secure.svc.cluster.local|hive|llapdaemon-0
+    llapdaemon-1.llapdaemon.secure.svc.cluster.local|hive|llapdaemon-1
     hue-0.hue-headless.secure.svc.cluster.local|hue|hue-0
 
   provision-host-keytabs.sh: |
