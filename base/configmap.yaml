@@ -212,6 +212,7 @@ data:
     #
     # Hive Environment Setup
     #
+    cd "${HIVE_HOME:-/opt/hive}" 2>/dev/null || true
     if [ -f ~/.bashrc ]; then
        # shellcheck source=/dev/null
        . ~/.bashrc
@@ -298,6 +299,20 @@ data:
        echo "admin:admin" | chpasswd
     }
     #
+    # kubectl exec -it <pod> -- bash|sh : interactive root shells become hive@/opt/hive
+    function installKubectlExecHiveDropIn(){
+       printf '%s\n' \
+          'if [ "$(id -u)" -eq 0 ] && [[ "$-" == *i* ]] && [ -z "${HIVE_EXEC_WRAPPER:-}" ]]; then' \
+          '  export HIVE_EXEC_WRAPPER=1' \
+          '  exec su - hive' \
+          'fi' > /root/.bashrc
+       printf '%s\n' \
+          'if [ "$(id -u)" -eq 0 ] && [ -t 0 ] && [ -z "${HIVE_EXEC_WRAPPER:-}" ]; then' \
+          '  export HIVE_EXEC_WRAPPER=1' \
+          '  exec su - hive' \
+          'fi' > /root/.profile
+    }
+    #
     function staging(){
        #
        # Installing OS packages
@@ -376,6 +391,7 @@ data:
        if [ -f "${HIVE_HOME}/setup/llap-query-yarn-logs.awk" ]; then
           cp "${HIVE_HOME}/setup/llap-query-yarn-logs.awk" "${HIVE_HOME}/bin/llap-query-yarn-logs.awk"
        fi
+       installKubectlExecHiveDropIn
        chown -R hive:hive /home/hive "${HIVE_HOME}" 2>/dev/null || true
        return 0
        

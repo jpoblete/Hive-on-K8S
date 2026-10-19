@@ -28,6 +28,7 @@ spec:
       - name: hivemetastore
         image: apache/hive:4.2.0
         imagePullPolicy: IfNotPresent
+        workingDir: /opt/hive
         command: ["/opt/hive/setup/start-hive.sh"]
         env:
           - name: HIVE_HOME

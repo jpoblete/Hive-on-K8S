@@ -123,7 +123,7 @@ Kubernetes **namespace = profile name** (`standalone`, `mini`, `llap`, `secure`)
 | Kind **`/var`** disk | `./hiveCtl.sh disk` ([Kind disk space](#kind-disk-space-imagepullbackoff)) |
 | **`secure`** keytabs | `./hiveCtl.sh resync-keytabs secure` (after KDC host list changes) |
 
-**Hive CLI:** `kubectl exec -it hiveserver2-0 -n <profile> -- su - hive` → `beeline`, `createTable.sh man managed_3_1 3 1 10 1`. **Standalone:** `hive-0` container `hiveserver2`. Details: [Smoke tests](#smoke-tests).
+**Hive CLI:** `kubectl exec -it hiveserver2-0 -n <profile> -- bash` (interactive shells auto **`su - hive`** with cwd **`/opt/hive`** on metastore / HS2 / LLAP pods) → `beeline`, `createTable.sh man managed_3_1 3 1 10 1`. **Standalone:** `hive-0` container `hiveserver2`. Details: [Smoke tests](#smoke-tests).
 
 ## Profiles
 
@@ -444,7 +444,7 @@ kubectl get pods -n secure -l app=hadoop-datanode
 Secure Beeline and **`createTable.sh`** (Kerberos; use an interactive shell or **`script -qefc '...' /dev/null`** under **`kubectl exec`**):
 
 ```bash
-kubectl exec -it hiveserver2-0 -n secure -- su - hive
+kubectl exec -it hiveserver2-0 -n secure -- bash
 kinit -kt /home/hive/host-service.keytab "hive/$(hostname -f)@SECURE.LAB"
 beeline -u "${BEELINE_URL}" -e "select 1;"
 cd /opt/hive/setup && ./createTable.sh man managed_3_1 3 1 10 1
