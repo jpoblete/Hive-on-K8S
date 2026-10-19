@@ -29,6 +29,7 @@ Read **Profiles** in order (simplest first). UIs and kind setup are grouped unde
 - [Images by profile](#images-by-profile)
 - [Prerequisites](#prerequisites) · [Hardware](#hardware-requirements)
 - [**Profiles**](#profiles) — `standalone` → `mini` → `llap` → `secure`
+- [**Secure profile (detailed)**](docs/secure-profile.md) — Kerberos ZK, Tez jar cache, disk, smoke tests
 - [Browser UIs & kind (`llap` / `secure`)](#browser-uis-and-kind-llap--secure)
 - [Data safety](#data-safety) · [Bootstrap model](#bootstrap-model) · [Lab OS users](#lab-os-users-supergroup)
 - [Smoke tests](#smoke-tests) · [Validation](#validation)
@@ -119,6 +120,8 @@ Kubernetes **namespace = profile name** (`standalone`, `mini`, `llap`, `secure`)
 | One component | `./hiveCtl.sh start <profile> <component>` (e.g. `hue`, `llapdaemon`, `hadoop-namenode`) |
 | Status | `./hiveCtl.sh status` · `kubectl get pods,pvc,svc -n <profile>` |
 | Backup / restore / cleanup | `./hiveCtl.sh backup|restore|cleanup <profile> [backup-dir]` |
+| Kind **`/var`** disk | `./hiveCtl.sh disk` ([Kind disk space](#kind-disk-space-imagepullbackoff)) |
+| **`secure`** keytabs | `./hiveCtl.sh resync-keytabs secure` (after KDC host list changes) |
 
 **Hive CLI:** `kubectl exec -it hiveserver2-0 -n <profile> -- su - hive` → `beeline`, `createTable.sh man managed_3_1 3 1 10 1`. **Standalone:** `hive-0` container `hiveserver2`. Details: [Smoke tests](#smoke-tests).
 
@@ -172,7 +175,7 @@ standalone  →  mini  →  llap  →  secure
 
 | | |
 |--|--|
-| **Adds (on top of `llap`-shaped Hive)** | MIT KDC, Kerberos HDFS (**1 NN + 3 DN**, `dfs.replication=3`); same **ZooKeeper, LLAP×2, Hue, 2×** Metastore & HiveServer2 as **`llap`**, all with Kerberos |
+| **Adds (on top of `llap`-shaped Hive)** | MIT KDC, Kerberos HDFS (**1 NN + 3 DN**, `dfs.replication=3`); **Kerberos SASL ZooKeeper**; **LLAP×2, Hue, 2×** Metastore & HiveServer2 (same scale as **`llap`**, all Kerberos-enabled) |
 | **Image** | `apache/hive:nightly` (see [Images by profile](#images-by-profile)) |
 | **Hive tier** | **2** Metastore · **2** HiveServer2 · **2** LLAP daemons (same as **`llap`**, Kerberos-enabled) |
 | **Stack** | `krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue` |
@@ -189,9 +192,11 @@ standalone  →  mini  →  llap  →  secure
 
 **HDFS:** Kerberos auth + **`dfs.data.transfer.protection=authentication`** on NN/DN; admin/backup via **`hadoop-namenode-0`** (not `hadoop-0`). Do not enable **`dfs.encrypt.data.transfer`** on the NameNode alone.
 
-**Hive:** Metastore SASL, **`hive.server2.authentication=KERBEROS`**, **`tez.local.mode=true`**, LLAP execution (**`hive.execution.mode=llap`**). Beeline: **`kinit`** then **`beeline -u "${BEELINE_URL}"`** inside an HS2 pod (ZK discovery + Kerberos).
+**Hive:** Metastore SASL, **`hive.server2.authentication=KERBEROS`**, **`tez.local.mode=true`**, LLAP execution (**`hive.execution.mode=llap`**). **`hive.server2.tez.initialize.default.sessions=false`** (Tez sessions open on first query; see [docs/secure-profile.md](docs/secure-profile.md)). Per-pod **`hive.user.install.directory`** and startup **`.hiveJars`** seeding on HS2. Beeline: **`kinit`** then **`beeline -u "${BEELINE_URL}"`** inside an HS2 pod (ZK discovery + Kerberos).
 
 **Hue:** **`use_sasl=true`** to HS2; File Browser WebHDFS to **`nameservice:9870`** as **`hue/…`**. Literal HS2 principal in `hue-hive-conf/hive-site.xml` (not `hive/_HOST`).
+
+**More:** [docs/secure-profile.md](docs/secure-profile.md) — ZK FQDN, LLAP ZK SASL, Tez jar troubleshooting, disk recovery, **`createTable.sh`** smoke steps.
 
 <a id="secure-hue"></a>
 
@@ -231,7 +236,14 @@ Applies to **`standalone`**, **`mini`**, **`llap`**, and **`secure`** on Kind/Do
 ./hiveCtl.sh disk    # print /var use per node and prune if needed
 ```
 
-If a node stays above **~98%**, increase Docker Desktop disk or run **`docker system prune -f`** on the host, then delete stuck pods.
+If a node stays above **~98%**:
+
+1. Increase **Docker Desktop** virtual disk (**≥100 GiB** recommended for **`llap`** / **`secure`**).
+2. Prune unused images on each Kind node: **`docker exec <node> crictl rmi --prune`** (same as **`./hiveCtl.sh disk`**).
+3. On the Docker host (review reclaimable space first): **`docker system df`**, then **`docker image prune -a -f`** if you can drop unused images.
+4. Delete stuck pods and retry the pull.
+
+On **`secure`**, a full **`/var`** often shows up as failed Tez **`hdfs://…/.hiveJars/…`** localization (partial uploads). See [docs/secure-profile.md — Disk](docs/secure-profile.md#disk-space-kind--docker-desktop).
 
 PVCs hold the persistent data. Deleting PVCs can cause data loss.
 
@@ -429,13 +441,17 @@ kubectl exec hadoop-namenode-0 -n secure -- bash -lc \
 kubectl get pods -n secure -l app=hadoop-datanode
 ```
 
-Secure Beeline (Kerberos JDBC; use an interactive shell or **`script -qefc '...' /dev/null`** under **`kubectl exec`**):
+Secure Beeline and **`createTable.sh`** (Kerberos; use an interactive shell or **`script -qefc '...' /dev/null`** under **`kubectl exec`**):
 
 ```bash
 kubectl exec -it hiveserver2-0 -n secure -- su - hive
+kinit -kt /home/hive/host-service.keytab "hive/$(hostname -f)@SECURE.LAB"
 beeline -u "${BEELINE_URL}" -e "select 1;"
-beeline -u "${BEELINE_URL}" -e "show databases;"
+cd /opt/hive/setup && ./createTable.sh man managed_3_1 3 1 10 1
+beeline -u "${BEELINE_URL}" -e "select c1, count(*) from managed_3_1 group by c1 order by c1;"
 ```
+
+After HS2 or ConfigMap changes: **`./hiveCtl.sh restart secure hiveserver2`** so both pods run **`.hiveJars`** cleanup/seed ([details](docs/secure-profile.md#per-pod-install-dir-and-tez-jar-cache-hivejars)). If ZK discovery sends you to an HS2 without a seeded cache, pin JDBC to **`hiveserver2-0`** (documented in **secure-profile**).
 
 Secure backup / restore smoke (destructive **`cleanup`** prompts for confirmation):
 
