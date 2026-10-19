@@ -187,6 +187,8 @@ data:
     # runLlapDaemon.sh reads its settings only from the environment and, unlike bin/hive,
     # adds neither the Hadoop classpath nor the JDK 17+ --add-opens flags.
     if [ "$SERVICE" = "llapdaemon" ]; then
+       llap_krb_opts=""
+       [ "${HIVE_KERBEROS:-0}" = "1" ] && llap_krb_opts="-Djavax.security.auth.useSubjectCredsOnly=false "
        export LLAP_DAEMON_HOME=/opt/hive
        export LLAP_DAEMON_CONF_DIR=$HIVE_CONF_DIR
        export LLAP_DAEMON_LOG_DIR=$HIVE_LOG_DIR
@@ -194,7 +196,7 @@ data:
        export LLAP_LOG4J2_PROPERTIES_FILE_NAME=llap-daemon-log4j2.properties
        LLAP_DAEMON_USER_CLASSPATH="$($HADOOP_HOME/bin/hadoop classpath)"
        export LLAP_DAEMON_USER_CLASSPATH
-       export LLAP_DAEMON_OPTS="$LLAP_DAEMON_OPTS -Djava.library.path=${HADOOP_HOME}/lib/native \
+       export LLAP_DAEMON_OPTS="$LLAP_DAEMON_OPTS ${llap_krb_opts}-Djava.library.path=${HADOOP_HOME}/lib/native \
          --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED \
          --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED \
          --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED \
@@ -427,14 +429,60 @@ data:
        waitForMetastoreDns || exit 1
        function cleanCorruptHiveJarCache(){
           [ "${SERVICE}" = "hiveserver2" ] || return 0
-          local dir="/opt/hive/install_dir/hive/.hiveJars"
+          local dir="/opt/hive/install_dir/${POD_NAME:-hive}/hive/.hiveJars"
           hdfs dfs -test -e "${dir}" 2>/dev/null || return 0
           if hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>0 && $5==0 {found=1} END{exit !found}'; then
              echo "Removing Tez jar cache with zero-byte stubs at ${dir}"
              hdfs dfs -rm -r -f "${dir}" || true
+             return 0
           fi
+          # Partial uploads (common when Kind /var is full) leave wrong-size jars and block Tez (PathExists).
+          local jar base hash remote remote_size local_path local_size
+          while IFS= read -r remote; do
+             [ -n "${remote}" ] || continue
+             jar="${remote##*/}"
+             base="${jar%.jar}"
+             hash="${base##*-}"
+             base="${base%-${hash}}"
+             local_path="${HIVE_HOME}/lib/${base}.jar"
+             [ -f "${local_path}" ] || continue
+             remote_size="$(hdfs dfs -stat '%b' "${remote}" 2>/dev/null || echo 0)"
+             local_size="$(stat -c '%s' "${local_path}" 2>/dev/null || echo 0)"
+             if [ "${remote_size}" != "${local_size}" ]; then
+                echo "Removing mismatched Tez jar on HDFS (${remote_size} vs ${local_size} bytes): ${remote}"
+                hdfs dfs -rm -f "${remote}" || true
+             fi
+          done < <(hdfs dfs -ls "${dir}" 2>/dev/null | awk 'NR>1 {print $NF}')
        }
+       function seedTezHiveJarsToHdfs(){
+          [ "${SERVICE}" = "hiveserver2" ] || return 0
+          [ -n "${POD_NAME:-}" ] || return 0
+          local dir="/opt/hive/install_dir/${POD_NAME}/hive/.hiveJars" jar base hash dest
+          echo "Pre-seeding Tez jar cache at ${dir}"
+          hdfs dfs -mkdir -p "${dir}" || return 1
+          for jar in "${HIVE_HOME}/lib/"*.jar; do
+             [ -f "${jar}" ] || continue
+             hash="$(sha256sum "${jar}" | awk '{print $1}')"
+             base="$(basename "${jar}" .jar)"
+             dest="${dir}/${base}-${hash}.jar"
+             hdfs dfs -put -f "${jar}" "${dest}" || return 1
+          done
+       }
+       if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ] \
+          && grep -q '__HIVE_USER_INSTALL_DIR__' "${HIVE_CONF_DIR}/hive-site.xml" 2>/dev/null; then
+          install_dir="/opt/hive/install_dir/${POD_NAME}"
+          runtime_conf="/opt/hive/conf-runtime"
+          mkdir -p "${runtime_conf}"
+          cp -a "${HIVE_CONF_DIR}/." "${runtime_conf}/"
+          sed -i "s|__HIVE_USER_INSTALL_DIR__|${install_dir}|g" "${runtime_conf}/hive-site.xml"
+          export HIVE_CONF_DIR="${runtime_conf}"
+          export HADOOP_CONF_DIR="${runtime_conf}"
+          echo "hiveserver2: hive.user.install.directory=${install_dir} (runtime conf ${runtime_conf})"
+       fi
        cleanCorruptHiveJarCache || true
+       if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ]; then
+          seedTezHiveJarsToHdfs || exit 1
+       fi
        [ ! -d "${HIVE_HOME}/.local/bin" ] && mkdir -p "${HIVE_HOME}/.local/bin"
        env | awk '/_PORT/ && /=tcp:\/\// {gsub(/tcp:\/\/.*:/,"");print $0}' | while IFS= read -r i; do
            echo "Correcting: ${i}"
@@ -485,10 +533,15 @@ data:
        id
        env
        echo "Starting ${SERVICE^} as user: $(whoami)"
+       hive_service_extra=()
+       if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ]; then
+          hive_service_extra=(--hiveconf "hive.user.install.directory=/opt/hive/install_dir/${POD_NAME}")
+       fi
        if [ "${SERVICE}" == "llapdaemon" ]; then
           "${HIVE_HOME}/scripts/llap/bin/runLlapDaemon.sh" run >& "${HIVE_HOME}/log/${SERVICE}-${HOSTNAME}-$(date +%s).log" &
        else
-          "${HIVE_HOME}/bin/hive" --service "${SERVICE}" >& "${HIVE_HOME}/log/${SERVICE/metastore/hivemetastore}-${HOSTNAME}-$(date +%s).log" &
+          "${HIVE_HOME}/bin/hive" --service "${SERVICE}" "${hive_service_extra[@]}" \
+            >& "${HIVE_HOME}/log/${SERVICE/metastore/hivemetastore}-${HOSTNAME}-$(date +%s).log" &
        fi
        service_pid=$!
        wait "${service_pid}"
@@ -507,7 +560,7 @@ data:
     #
     if [ "$(whoami)" == "root" ]; then
        /opt/hive/setup/staging.sh || exit 1
-       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export HIVE_KERBEROS=${HIVE_KERBEROS:-0}; export KRB5_REALM=${KRB5_REALM:-}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; export HIVE_LOG_HDFS_BASE=${HIVE_LOG_HDFS_BASE:-}; export HIVE_LOG_HDFS_SYNC_INTERVAL_SEC=${HIVE_LOG_HDFS_SYNC_INTERVAL_SEC:-300}; export HIVE_LOG_HDFS_HISTORY_MAX=${HIVE_LOG_HDFS_HISTORY_MAX:-10}; /opt/hive/setup/start-hive.sh" - hive
+       exec su -s /bin/bash -c "export SERVICE=${SERVICE}; export POD_NAME=${POD_NAME:-}; export HIVE_KERBEROS=${HIVE_KERBEROS:-0}; export KRB5_REALM=${KRB5_REALM:-}; export HIVE_PASSWORD=${HIVE_PASSWORD:-}; export HIVE_METASTORE_PASSWORD=${HIVE_METASTORE_PASSWORD:-}; export BEELINE_PASSWORD=${BEELINE_PASSWORD:-}; export LLAP_DAEMON_HEAPSIZE=${LLAP_DAEMON_HEAPSIZE:-}; export HIVE_LOG_HDFS_BASE=${HIVE_LOG_HDFS_BASE:-}; export HIVE_LOG_HDFS_SYNC_INTERVAL_SEC=${HIVE_LOG_HDFS_SYNC_INTERVAL_SEC:-300}; export HIVE_LOG_HDFS_HISTORY_MAX=${HIVE_LOG_HDFS_HISTORY_MAX:-10}; /opt/hive/setup/start-hive.sh" - hive
     else
        startHive
     fi

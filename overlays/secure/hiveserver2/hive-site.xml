@@ -68,20 +68,12 @@
          <value>/home/hive/host-service.keytab</value>
       </property>
       <property>
-         <name>hive.llap.zk.sm.principal</name>
-         <value>hive/_HOST@SECURE.LAB</value>
-      </property>
-      <property>
-         <name>hive.llap.zk.sm.keytab.file</name>
-         <value>/home/hive/host-service.keytab</value>
-      </property>
-      <property>
          <name>hive.llap.zk.sm.connectionString</name>
-         <value>zookeeper.secure.svc.cluster.local:2181</value>
+         <value>zookeeper-0.zookeeper.secure.svc.cluster.local:2181</value>
       </property>
       <property>
          <name>hive.cluster.delegation.token.store.zookeeper.connectString</name>
-         <value>zookeeper.secure.svc.cluster.local:2181</value>
+         <value>zookeeper-0.zookeeper.secure.svc.cluster.local:2181</value>
       </property>
       <property>
          <name>javax.jdo.option.ConnectionURL</name>
@@ -113,7 +105,7 @@
       </property>
       <property>
          <name>hive.user.install.directory</name>
-         <value>/opt/hive/install_dir</value>
+         <value>__HIVE_USER_INSTALL_DIR__</value>
       </property>
       <property>
          <name>hive.execution.engine</name>
@@ -125,7 +117,7 @@
       </property>
       <property>
          <name>hive.server2.tez.initialize.default.sessions</name>
-         <value>true</value>
+         <value>false</value>
       </property>
       <property>
          <name>hive.server2.tez.default.queues</name>
@@ -157,7 +149,7 @@
       </property>
       <property>
          <name>hive.zookeeper.quorum</name>
-         <value>zookeeper.secure.svc.cluster.local:2181</value>
+         <value>zookeeper-0.zookeeper.secure.svc.cluster.local:2181</value>
       </property>
       <property>
          <name>hive.server2.support.dynamic.service.discovery</name>

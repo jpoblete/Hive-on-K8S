@@ -96,7 +96,7 @@ patches:
           - name: SERVICE
             value: "hiveserver2"
           - name: BEELINE_URL
-            value: "jdbc:hive2://zookeeper.secure.svc.cluster.local:2181/default;serviceDiscoveryMode=zooKeeper;zooKeeperNamespace=hiveserver2;auth=KERBEROS;principal=hive/_HOST@SECURE.LAB"
+            value: "jdbc:hive2://zookeeper-0.zookeeper.secure.svc.cluster.local:2181/default;serviceDiscoveryMode=zooKeeper;zooKeeperNamespace=hiveserver2;auth=KERBEROS;principal=hive/_HOST@SECURE.LAB"
           - name: ROOT_PASSWORD
             valueFrom:
               secretKeyRef:

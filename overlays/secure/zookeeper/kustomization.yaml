@@ -2,14 +2,22 @@
 # Author: j.martinez.poblete@gmail.com
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+namespace: secure
 resources:
   - serviceaccount.yaml
   - ../../../components/zookeeper
 patches:
+  - path: kerberos-statefulset.yaml
   - patch: |-
       - op: replace
         path: /metadata/namespace
         value: secure
     target:
       name: zookeeper
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: zookeeper-krb
+    files:
+      - jaas.conf
 #EOF
