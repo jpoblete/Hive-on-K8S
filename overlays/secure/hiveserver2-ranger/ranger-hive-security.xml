@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Usage Notice: This project is not meant for commercial use without permission and proper credit. -->
+<!-- Author: j.martinez.poblete@gmail.com -->
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+   <property>
+      <name>ranger.plugin.hive.service.name</name>
+      <value>secure_hive</value>
+   </property>
+   <property>
+      <name>ranger.plugin.hive.policy.source.impl</name>
+      <value>org.apache.ranger.admin.client.RangerAdminRESTClient</value>
+   </property>
+   <property>
+      <name>ranger.plugin.hive.policy.rest.url</name>
+      <value>http://ranger.secure.svc.cluster.local:6080</value>
+   </property>
+   <property>
+      <name>ranger.plugin.hive.policy.rest.ssl.config.file</name>
+      <value>/opt/hive/conf/ranger-hive-policymgr-ssl.xml</value>
+   </property>
+   <!-- Lab: Ranger Admin uses local login (not SPNEGO); HS2 cluster is Kerberos. -->
+   <property>
+      <name>ranger.plugin.hive.policy.rest.client.username</name>
+      <value>admin</value>
+   </property>
+   <property>
+      <name>ranger.plugin.hive.policy.rest.client.password</name>
+      <value>__RANGER_ADMIN_PASSWORD__</value>
+   </property>
+   <property>
+      <name>ranger.plugin.hive.policy.pollIntervalMs</name>
+      <value>30000</value>
+   </property>
+   <property>
+      <name>ranger.plugin.hive.policy.cache.dir</name>
+      <value>/opt/hive/ranger/policycache</value>
+   </property>
+   <property>
+      <name>xasecure.hive.update.xapolicies.on.grant.revoke</name>
+      <value>true</value>
+   </property>
+</configuration>

@@ -174,6 +174,7 @@ data:
     #
        if [ "$SERVICE" = "hiveserver2" ]; then
        hive_log_file="${SERVICE}-$(hostname -f)-$(date +%s).log"
+       hs2_log_id="${POD_NAME:-$(hostname -s)}"
        # Tez local AM RPC runs off the HS2 handler thread; allow keytab login user on IPC (not only Subject-bound creds).
        hs2_krb_opts=""
        [ "${HIVE_KERBEROS:-0}" = "1" ] && hs2_krb_opts="-Djavax.security.auth.useSubjectCredsOnly=false "
@@ -181,7 +182,7 @@ data:
          -Dhive.log.dir=$HIVE_LOG_DIR \
          -Dhive.log.file=${hive_log_file} -Dlog4j.configurationFile=$HIVE_CONF_DIR/hive-log4j2.properties \
          -XX:+UseG1GC -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$HIVE_LOG_DIR \
-         -Xlog:gc*=info:file=$HIVE_LOG_DIR/gc-${SERVICE}-%p-%t.log:time,uptime,level,tags:filecount=5,filesize=16M"
+         -Xlog:gc*=info:file=$HIVE_LOG_DIR/gc-${SERVICE}-${hs2_log_id}-%p-%t.log:time,uptime,level,tags:filecount=5,filesize=16M"
        export HADOOP_CLIENT_OPTS="$HADOOP_CLIENT_OPTS ${hs2_jvm_common}"
        # HiveServer2 daemon JVM reads HADOOP_OPTS (not only HADOOP_CLIENT_OPTS); Tez local AM IPC needs the same flags.
        export HADOOP_OPTS="${HADOOP_OPTS} ${hs2_jvm_common}"
@@ -302,7 +303,7 @@ data:
     # kubectl exec -it <pod> -- bash|sh : interactive root shells become hive@/opt/hive
     function installKubectlExecHiveDropIn(){
        printf '%s\n' \
-          'if [ "$(id -u)" -eq 0 ] && [[ "$-" == *i* ]] && [ -z "${HIVE_EXEC_WRAPPER:-}" ]]; then' \
+          'if [ "$(id -u)" -eq 0 ] && [ -t 0 ] && [ -z "${HIVE_EXEC_WRAPPER:-}" ]; then' \
           '  export HIVE_EXEC_WRAPPER=1' \
           '  exec su - hive' \
           'fi' > /root/.bashrc
@@ -344,6 +345,13 @@ data:
        mkdir -p "${HIVE_HOME}/install_dir"
        mkdir -p "${HIVE_HOME}/data/warehouse"
        cp "${HIVE_HOME}"/setup/*.xml "${HIVE_HOME}/conf/"
+       if [ "${SERVICE}" = "hiveserver2" ] && [ -f "${HIVE_HOME}/setup/hive-site-ranger-addon.xml" ]; then
+          tmp="$(mktemp)"
+          head -n -1 "${HIVE_HOME}/conf/hive-site.xml" > "${tmp}"
+          cat "${HIVE_HOME}/setup/hive-site-ranger-addon.xml" >> "${tmp}"
+          echo '</configuration>' >> "${tmp}"
+          mv "${tmp}" "${HIVE_HOME}/conf/hive-site.xml"
+       fi
        cp "${HIVE_HOME}/setup/hive-env.sh" "${HIVE_HOME}/conf/"
        cp "${HIVE_HOME}/setup/bashrc" /home/hive/.bashrc
        cp "${HIVE_HOME}/setup/bash_profile" /home/hive/.bash_profile
@@ -358,6 +366,9 @@ data:
        if [ -n "${HIVE_METASTORE_PASSWORD:-}" ]; then
           sed -i "s/__HIVE_METASTORE_PASSWORD__/${HIVE_METASTORE_PASSWORD}/g" "${HIVE_HOME}/conf/hive-site.xml"
        fi
+       if [ -n "${RANGER_ADMIN_PASSWORD:-}" ] && [ -f "${HIVE_HOME}/conf/ranger-hive-security.xml" ]; then
+          sed -i "s/__RANGER_ADMIN_PASSWORD__/${RANGER_ADMIN_PASSWORD}/g" "${HIVE_HOME}/conf/ranger-hive-security.xml"
+       fi
        if [ "${HIVE_KERBEROS:-0}" = "1" ] && [ "${SERVICE}" = "hiveserver2" ]; then
           fqdn="$(hostname -f)"
           short="$(hostname -s)"
@@ -366,7 +377,7 @@ data:
           # Tez local AM RPC uses java.net.InetAddress.getLocalHost() (kernel hostname). Must match kinit hive/<fqdn>@.
           pod_ip="$(hostname -I | awk '{print $1}')"
           hostname "${fqdn}" 2>/dev/null || true
-          if ! grep -q "[[:space:]]${fqdn}[[:space:]]" /etc/hosts; then
+          if ! grep -Fq " ${fqdn} " /etc/hosts && ! grep -Fq " ${fqdn}"$'\t' /etc/hosts; then
              echo "${pod_ip} ${fqdn} ${short}" >> /etc/hosts
           fi
        fi

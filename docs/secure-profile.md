@@ -43,6 +43,41 @@ LLAP on **Hive 4.3** (`apache/hive:nightly`) uses a ZooKeeper-backed delegation-
 ./hiveCtl.sh restart secure zookeeper
 ```
 
+## LLAP cross-node shuffle (Kind on Apple Silicon)
+
+**Symptom:** A GROUP BY / ORDER BY over LLAP fails once with **`IO_ERROR`**, **`NUM_FAILED_SHUFFLE_INPUTS`**, **`Vertex … failed as task … failed after vertex succeeded`**, or the UI hangs at **`Reducer … 0(+N)/N`** after Map succeeded. **Re-running the same SQL often succeeds** (~1–2s) with no other change.
+
+**Why:** With **two LLAP daemons**, Tez may place the map on **`llapdaemon-1`** and reducers on **`llapdaemon-0`** (`NODE_USED_COUNT: 2`). Remote shuffle uses the LLAP **ShuffleHandler**, which calls Hadoop **`SecureIOUtils`** and needs **loadable `libhadoop` natives**. On **`aarch64`** Kind nodes, the **`apache/hive:nightly`** image often ships **x86_64** natives — **`hadoop checknative -a`** reports **zlib/hadoop: false** (see **`configureHiveLlapIoEnabled`** in **`base/configmap.yaml`**, which disables **`hive.llap.io.enabled`** but does **not** fix network shuffle).
+
+When **`tez.runtime.optimize.local.fetch=true`** and the scheduler keeps map + reducers on **one** daemon (`NODE_USED_COUNT: 1`), shuffle stays local and the query succeeds.
+
+**LLAP daemon logs (producer or consumer):**
+
+```text
+ShuffleHandler: Shuffle error: java.lang.NoClassDefFoundError: Could not initialize class org.apache.hadoop.io.SecureIOUtils
+Caused by: Secure IO is not possible without native code extensions.
+```
+
+Fetchers may log **`Premature EOF from inputStream`**.
+
+**Tez tuning (secure HS2 `hive-site.xml`):** Lab defaults relax false positives on a **two-host** pool without disabling retry entirely:
+
+| Property | Lab value | Default | Role |
+|----------|-----------|---------|------|
+| `tez.am.max.allowed.downstream.host.failures.fraction` | **0.6** | 0.2 | One blaming host of two is **0.5**; must stay below threshold |
+| `tez.task.max.allowed.output.failures.fraction` | **0.75** | 0.1 | Single consumer can report **`failureFraction=1.0`** |
+| `tez.am.max.allowed.time-sec.for-read-error` | **90** | 300 | Cap wait when producer is not yet failed |
+
+Setting **both** failure fractions to **1.0** avoids some fast fails but can **hang** reducers for up to the read-error window when shuffle data never arrives.
+
+**What to do in the lab:**
+
+1. **Retry the query** (expected on aarch64 + 2× LLAP).
+2. Prefer **one LLAP replica** on arm64 dev clusters, or **amd64** Kind workers / images with matching natives.
+3. After shuffle errors, **`./hiveCtl.sh restart secure llapdaemon`** clears a JVM where **`SecureIOUtils`** failed to initialize (optional; co-located retry often enough).
+
+This is **not** Ranger, Metastore, or HS2 readiness; compile and Tez launch succeed before shuffle fails.
+
 ## Tez local mode and LLAP queries
 
 - **`tez.local.mode=true`** — Tez AM runs inside HiveServer2 (no YARN in this lab).
@@ -152,6 +187,7 @@ beeline -u "${BEELINE_URL}" -e "select c1, count(*) from managed_3_1 group by c1
 | `AuthFailed` / ZK **`InvalidACL`** on `/zkdtsm_hive_llap0` | ZK not Kerberized or wrong connect string |
 | `TezSession has already shutdown` | HS2 restarted mid-query; retry in interactive shell |
 | Beeline connects to **`hiveserver2-1`** but only **`hiveserver2-0`** seeded | Restart both HS2 or pin **`BEELINE_URL`** (above) |
+| `IO_ERROR` / shuffle / **failed after vertex succeeded** (first run OK on retry) | Cross-node LLAP shuffle on **aarch64** without working Hadoop natives — [LLAP cross-node shuffle](#llap-cross-node-shuffle-kind-on-apple-silicon) |
 
 ## Keytabs and KDC
 

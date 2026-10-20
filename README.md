@@ -269,6 +269,8 @@ Typical keys in Secret **`hive-credentials`** (namespace = profile name):
 
 Treat backup directories as sensitive because they contain both data and credentials.
 
+**`secure` backup contents:** `hive-credentials.secret.json`, `mysql-hive.sql`, `hdfs-backup.tgz`, and (when Ranger Admin has been started) **`mysql-ranger.sql`** — full MySQL dump of the **`ranger`** database (services, policies, users). Restore imports Ranger policies before the stack starts so **`secure_hive`** and HS2 plugin settings match the backup.
+
 `stop` keeps the PVCs and gives each pod its grace period to shut its services down cleanly. When the Kubernetes API can't be reached, `hiveCtl.sh` reports the error and stops rather than treating components as stopped or missing.
 
 Use backup before cleanup:
@@ -459,7 +461,10 @@ Secure backup / restore smoke (destructive **`cleanup`** prompts for confirmatio
 ./hiveCtl.sh backup secure
 ./hiveCtl.sh cleanup secure    # offers backup; type profile name to confirm
 ./hiveCtl.sh restore secure ./backups/secure-YYYYMMDD-HHMMSS
+# Optional Ranger (same as start): HIVECTL_SECURE_RANGER=1 HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh restore secure ./backups/secure-YYYYMMDD-HHMMSS
 ```
+
+On **Apple Silicon / aarch64** Kind, the first LLAP GROUP BY after HS2 restart may fail with shuffle **`IO_ERROR`** and succeed on **retry** when Tez co-locates tasks on one daemon — see [docs/secure-profile.md — LLAP cross-node shuffle](docs/secure-profile.md#llap-cross-node-shuffle-kind-on-apple-silicon).
 
 Secure Hue — [Browser UIs](#browser-uis-and-kind-llap--secure):
 

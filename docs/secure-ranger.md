@@ -9,7 +9,7 @@ See [secure-profile.md](secure-profile.md) for the running stack.
 | Phase | What | Repo state |
 |-------|------|------------|
 | **1** | Ranger Admin + MySQL (`apache/ranger:2.4.0`) | **`components/ranger`**, **`overlays/secure/ranger`** — opt-in |
-| **2** | Hive plugin on HS2 (`apache/hive:nightly`) | Design + build steps below |
+| **2** | Hive plugin on HS2 (`apache/hive:nightly`) | **`docker/hive-ranger`**, **`overlays/secure/hiveserver2-ranger`**, `HIVECTL_SECURE_RANGER_HS2=1` |
 | **3** | HDFS plugin on NameNode | Pending |
 | **4** | HMS pre-event + Hue | Pending |
 
@@ -77,6 +77,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:6080/login.jsp   # via
 
 If Admin stays in CrashLoop, inspect logs for MySQL connectivity or failed `setup.sh` (wrong password, DB missing).
 
+## Backup and restore (policies)
+
+Ranger stores policies in MySQL database **`ranger`** on **`mysql-0`**. **`./hiveCtl.sh backup secure`** stops Ranger Admin (when running), then writes **`mysql-ranger.sql`** alongside the Hive metastore and HDFS archives. If Ranger was never started, backup skips the Ranger file and prints a hint.
+
+**Restore:** **`./hiveCtl.sh restore secure <backup-dir>`** loads **`mysql-ranger.sql`** when present (after **`mysql-hive.sql`**, before HDFS). It creates the **`rangeradmin`** user if needed, then imports the dump so **`secure_hive`** and policies reappear without re-running the UI setup.
+
+```bash
+./hiveCtl.sh backup secure
+# optional: HIVECTL_SECURE_RANGER=1 for full stack including Ranger on restore
+./hiveCtl.sh restore secure ./backups/secure-YYYYMMDD-HHMMSS
+```
+
+After restore with Phase 2 HS2, rebuild/load the custom image if Kind pruned it (`docker/hive-ranger/README.md`), then **`HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2`**. Wait ~30s for policy poll or restart HS2 before testing authorization.
+
 ## Architecture (target)
 
 ```text
@@ -103,26 +117,33 @@ HS2 still authenticates clients (Kerberos); **Ranger** evaluates the session use
 
 After changing these properties, restart **HMS**, **HS2**, and **LLAP** (`./hiveCtl.sh restart secure hiveserver2` etc.).
 
-Stock **`apache/hive:nightly`** has **no** Ranger jars. Typical path:
+Stock **`apache/hive:nightly`** has **no** Ranger jars. This repo ships:
 
-1. Build from [Apache Ranger `dev-support/ranger-docker`](https://github.com/apache/ranger/tree/master/dev-support/ranger-docker) (or `mvn package`) for a **`ranger-*-hive-plugin.tar.gz`** aligned with **Hive 4.3 / Hadoop 3.4**.
-2. **`docker/hive-ranger/Dockerfile`** (planned): `FROM apache/hive:nightly`, extract plugin, run **`enable-hive-plugin.sh`** with `COMPONENT_INSTALL_DIR_NAME=/opt/hive`.
-3. Point plugin at Admin: **`ranger.plugin.hive.policy.rest.url=http://ranger.secure.svc.cluster.local:6080`** (or headless FQDN).
-4. Patch **`overlays/secure/hiveserver2/hive-site.xml`**:
+1. **`docker/hive-ranger/build-ranger-hive-plugin.sh`** — builds **`hive-agent`** from **Ranger `master`** (Hive **4.3 nightly** API); REST deps from Maven + **`apache/ranger:2.4.0`** Admin image as fallback.
+2. **`docker/hive-ranger/Dockerfile`** — `FROM apache/hive:nightly`, copies plugin JARs into `/opt/hive/lib`.
+3. HS2 overlay injects **`ranger.plugin.hive.policy.rest.client.*`** (admin password from **`hive-credentials`**) because Phase 1 Admin uses local login, not Kerberos SPNEGO.
+3. **`overlays/secure/hiveserver2-ranger`** — Ranger XML + HS2 authorizer properties; opt-in with **`HIVECTL_SECURE_RANGER_HS2=1`**.
 
-```xml
-<property>
-  <name>hive.security.authorization.enabled</name>
-  <value>true</value>
-</property>
-<property>
-  <name>hive.security.authorization.manager</name>
-  <value>org.apache.ranger.authorization.hive.authorizer.RangerHiveAuthorizerFactory</value>
-</property>
+```bash
+cd docker/hive-ranger && ./build-ranger-hive-plugin.sh
+docker build -t hive-on-k8s/hive-ranger:2.4.0-nightly .
+kind load docker-image hive-on-k8s/hive-ranger:2.4.0-nightly   # if using Kind
+
+./hiveCtl.sh start secure ranger
+# Ranger UI: create Hive service named secure_hive (matches ranger-hive-security.xml)
+
+HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh stop secure hiveserver2
+HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2
 ```
 
-5. In Ranger UI, add **Hive** service instance for **`hiveserver2-0/1`** (JDBC URL + service config).
-6. Smoke: deny `admin` on a table; allow `hive` — via Beeline with Kerberos.
+Plugin REST URL: **`http://ranger.secure.svc.cluster.local:6080`**. Service name **`secure_hive`**.
+
+6. Smoke: deny/allow via Beeline with Kerberos. Lab **`admin`** (`admin/admin@SECURE.LAB`) should have **all** privileges on **`default`** and on databases/tables/UDFs **they own** (`{OWNER}` rows), not on every database:
+
+```bash
+./scripts/secure-ranger-admin-default-and-owner.sh secure
+# Wait ~30s (policy poll) or restart HS2, then re-run the query as admin.
+```
 
 **LLAP:** Enforcement stays on the **HS2** session path; no separate LLAP daemon plugin in most deployments.
 

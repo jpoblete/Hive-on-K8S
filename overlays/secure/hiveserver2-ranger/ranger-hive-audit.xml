@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lab: DB audit via Ranger Admin only; plugin-side Solr/HDFS audit off. -->
+<configuration>
+   <property>
+      <name>xaaudit.is.enabled</name>
+      <value>false</value>
+   </property>
+   <property>
+      <name>xaaudit.solr.is.enabled</name>
+      <value>false</value>
+   </property>
+   <property>
+      <name>xaaudit.hdfs.is.enabled</name>
+      <value>false</value>
+   </property>
+</configuration>

@@ -1,0 +1,14 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hivemetastore
+spec:
+  template:
+    spec:
+      containers:
+        - name: hivemetastore
+          image: hive-on-k8s/hive-ranger:2.4.0-nightly
+          imagePullPolicy: IfNotPresent
+#EOF

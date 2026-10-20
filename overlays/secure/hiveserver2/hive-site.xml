@@ -137,6 +137,24 @@
          <name>tez.am.launch.cmd-opts</name>
          <value>-Djavax.security.auth.useSubjectCredsOnly=false -Dhadoop.security.kerberos.use.canonical.hostname=true</value>
       </property>
+      <!-- Lab (2 LLAP daemons): avoid 0.5 host-blame false positives (default 0.2) without disabling retry (1.0 hangs ~5m). -->
+      <property>
+         <name>tez.am.max.allowed.downstream.host.failures.fraction</name>
+         <value>0.6</value>
+      </property>
+      <property>
+         <name>tez.task.max.allowed.output.failures.fraction</name>
+         <value>0.75</value>
+      </property>
+      <property>
+         <name>tez.task.max.allowed.output.failures</name>
+         <value>20</value>
+      </property>
+      <property>
+         <name>tez.am.max.allowed.time-sec.for-read-error</name>
+         <value>90</value>
+         <description>Default 300; cap wait when shuffle read errors do not yet fail the producer.</description>
+      </property>
       <property>
          <name>hive.tez.java.opts</name>
          <value>-Djavax.security.auth.useSubjectCredsOnly=false -Dhadoop.security.kerberos.use.canonical.hostname=true</value>

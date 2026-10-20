@@ -12,6 +12,8 @@ HIVE_LOG_DIR="${HIVE_LOG_DIR:-${HIVE_HOME}/log}"
 HIVE_LOG_HDFS_BASE="${HIVE_LOG_HDFS_BASE:-}"
 HIVE_LOG_HDFS_SYNC_INTERVAL_SEC="${HIVE_LOG_HDFS_SYNC_INTERVAL_SEC:-300}"
 HIVE_LOG_HDFS_HISTORY_MAX="${HIVE_LOG_HDFS_HISTORY_MAX:-10}"
+HIVE_LOG_LOCAL_GC_MAX="${HIVE_LOG_LOCAL_GC_MAX:-5}"
+HIVE_LOG_LOCAL_MAIN_MAX="${HIVE_LOG_LOCAL_MAIN_MAX:-2}"
 HIVE_LOG_SCRATCH_STRINGS_MAX="${HIVE_LOG_SCRATCH_STRINGS_MAX:-32768}"
 # Include INFO/WARN lines scoped to each application in tez/ and llap/ exports (1=yes, 0=no).
 HIVE_LOG_EXPORT_INFO_WARN="${HIVE_LOG_EXPORT_INFO_WARN:-1}"
@@ -42,6 +44,19 @@ canonical_log_basename() {
          ;;
       *)
          printf '%s\n' "${base}"
+         ;;
+   esac
+}
+
+is_gc_log_basename() {
+   local base="$1"
+
+   case "${base}" in
+      gc-hiveserver2-*|gc-metastore-*|gc-hivemetastore-*|hiveserver2-gc-*|hivemetastore-gc-*)
+         return 0
+         ;;
+      *)
+         return 1
          ;;
    esac
 }
@@ -452,21 +467,56 @@ stage_llap_query_logs() {
    fi
 }
 
+# Copy newest main + newest GC into staging/log (not every file under HIVE_LOG_DIR).
+stage_newest_logs_for_archive() {
+   local staging="$1"
+   local main gc base canon
+
+   case "${SERVICE}" in
+      hiveserver2)
+         if main="$(find_newest_main_log)"; then
+            base="$(basename "${main}")"
+            cp "${main}" "${staging}/log/${base}" 2>/dev/null || true
+         fi
+         if gc="$(find_newest_gc_log)"; then
+            base="$(basename "${gc}")"
+            canon="$(canonical_log_basename "${base}")"
+            cp "${gc}" "${staging}/log/${canon}" 2>/dev/null || true
+         fi
+         ;;
+      metastore)
+         if main="$(find_newest_main_log)"; then
+            base="$(basename "${main}")"
+            cp "${main}" "${staging}/log/${base}" 2>/dev/null || true
+         fi
+         if gc="$(find_newest_gc_log)"; then
+            base="$(basename "${gc}")"
+            canon="$(canonical_log_basename "${base}")"
+            cp "${gc}" "${staging}/log/${canon}" 2>/dev/null || true
+         fi
+         ;;
+      llapdaemon)
+         if main="$(find_newest_main_log)"; then
+            base="$(basename "${main}")"
+            cp "${main}" "${staging}/log/${base}" 2>/dev/null || true
+         fi
+         ;;
+      *)
+         if main="$(find_newest_log '*.log')"; then
+            base="$(basename "${main}")"
+            cp "${main}" "${staging}/log/${base}" 2>/dev/null || true
+         fi
+         ;;
+   esac
+}
+
 # Copy logs into staging/log with canonical GC names; optional Tez scratch for HS2.
 prepare_archive_staging() {
    local staging="$1"
-   local f base canon
 
    rm -rf "${staging}"
    mkdir -p "${staging}/log"
-   shopt -s nullglob
-   for f in "${HIVE_LOG_DIR}"/*; do
-      [ -f "${f}" ] || continue
-      base="$(basename "${f}")"
-      canon="$(canonical_log_basename "${base}")"
-      cp "${f}" "${staging}/log/${canon}" 2>/dev/null || true
-   done
-   shopt -u nullglob
+   stage_newest_logs_for_archive "${staging}"
    if [ "${SERVICE}" = "hiveserver2" ]; then
       stage_tez_scratch_readable "${staging}"
    fi
@@ -495,6 +545,163 @@ find_newest_log() {
    shopt -u nullglob
    [ -n "${newest}" ] || return 1
    printf '%s\n' "${newest}"
+}
+
+# Newest non-GC main log for the current SERVICE.
+find_newest_main_log() {
+   local newest="" f mtime best=0 base
+
+   [ -d "${HIVE_LOG_DIR}" ] || return 1
+   shopt -s nullglob
+   case "${SERVICE}" in
+      hiveserver2)
+         for f in "${HIVE_LOG_DIR}"/hiveserver2*.log; do
+            [ -f "${f}" ] || continue
+            base="$(basename "${f}")"
+            is_gc_log_basename "${base}" && continue
+            mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+            if [ "${mtime}" -ge "${best}" ]; then
+               best="${mtime}"
+               newest="${f}"
+            fi
+         done
+         ;;
+      metastore)
+         for f in "${HIVE_LOG_DIR}"/hivemetastore*.log; do
+            [ -f "${f}" ] || continue
+            base="$(basename "${f}")"
+            is_gc_log_basename "${base}" && continue
+            mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+            if [ "${mtime}" -ge "${best}" ]; then
+               best="${mtime}"
+               newest="${f}"
+            fi
+         done
+         ;;
+      llapdaemon)
+         for f in "${HIVE_LOG_DIR}"/llapdaemon*.log; do
+            [ -f "${f}" ] || continue
+            mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+            if [ "${mtime}" -ge "${best}" ]; then
+               best="${mtime}"
+               newest="${f}"
+            fi
+         done
+         ;;
+      *)
+         find_newest_log '*.log'
+         shopt -u nullglob
+         return $?
+         ;;
+   esac
+   shopt -u nullglob
+   [ -n "${newest}" ] || return 1
+   printf '%s\n' "${newest}"
+}
+
+# Newest GC log (JVM gc-* or canonical hiveserver2-gc-* from older archives).
+find_newest_gc_log() {
+   local f
+
+   case "${SERVICE}" in
+      hiveserver2)
+         if f="$(find_newest_log 'gc-hiveserver2*.log')"; then
+            printf '%s\n' "${f}"
+            return 0
+         fi
+         if f="$(find_newest_log 'hiveserver2-gc*.log')"; then
+            printf '%s\n' "${f}"
+            return 0
+         fi
+         return 1
+         ;;
+      metastore)
+         if f="$(find_newest_log 'gc-metastore*.log')"; then
+            printf '%s\n' "${f}"
+            return 0
+         fi
+         if f="$(find_newest_log 'gc-hivemetastore*.log')"; then
+            printf '%s\n' "${f}"
+            return 0
+         fi
+         if f="$(find_newest_log 'hivemetastore-gc*.log')"; then
+            printf '%s\n' "${f}"
+            return 0
+         fi
+         return 1
+         ;;
+      *)
+         return 1
+         ;;
+   esac
+}
+
+# Drop older GC and main logs under HIVE_LOG_DIR after a successful HDFS push.
+prune_local_log_files() {
+   local keep_gc="${HIVE_LOG_LOCAL_GC_MAX:-5}"
+   local keep_main="${HIVE_LOG_LOCAL_MAIN_MAX:-2}"
+   local -a ranked=()
+   local f mtime i n base
+
+   [ -d "${HIVE_LOG_DIR}" ] || return 0
+
+   ranked=()
+   shopt -s nullglob
+   for f in "${HIVE_LOG_DIR}"/gc-hiveserver2*.log "${HIVE_LOG_DIR}"/gc-metastore*.log \
+      "${HIVE_LOG_DIR}"/gc-hivemetastore*.log "${HIVE_LOG_DIR}"/hiveserver2-gc*.log \
+      "${HIVE_LOG_DIR}"/hivemetastore-gc*.log; do
+      [ -f "${f}" ] || continue
+      mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+      ranked+=("${mtime} ${f}")
+   done
+   shopt -u nullglob
+   if [ "${#ranked[@]}" -gt 0 ]; then
+      mapfile -t ranked < <(printf '%s\n' "${ranked[@]}" | sort -rn)
+      n="${#ranked[@]}"
+      for (( i=keep_gc; i<n; i++ )); do
+         f="${ranked[i]#* }"
+         rm -f "${f}" 2>/dev/null || true
+      done
+   fi
+
+   ranked=()
+   shopt -s nullglob
+   case "${SERVICE}" in
+      hiveserver2)
+         for f in "${HIVE_LOG_DIR}"/hiveserver2*.log; do
+            [ -f "${f}" ] || continue
+            base="$(basename "${f}")"
+            is_gc_log_basename "${base}" && continue
+            mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+            ranked+=("${mtime} ${f}")
+         done
+         ;;
+      metastore)
+         for f in "${HIVE_LOG_DIR}"/hivemetastore*.log; do
+            [ -f "${f}" ] || continue
+            base="$(basename "${f}")"
+            is_gc_log_basename "${base}" && continue
+            mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+            ranked+=("${mtime} ${f}")
+         done
+         ;;
+      llapdaemon)
+         for f in "${HIVE_LOG_DIR}"/llapdaemon*.log; do
+            [ -f "${f}" ] || continue
+            mtime="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || echo 0)"
+            ranked+=("${mtime} ${f}")
+         done
+         ;;
+   esac
+   shopt -u nullglob
+   if [ "${#ranked[@]}" -gt 0 ]; then
+      mapfile -t ranked < <(printf '%s\n' "${ranked[@]}" | sort -rn)
+      n="${#ranked[@]}"
+      for (( i=keep_main; i<n; i++ )); do
+         f="${ranked[i]#* }"
+         rm -f "${f}" 2>/dev/null || true
+      done
+   fi
 }
 
 # Keep newest $keep files in an HDFS directory (paths sorted newest-first by hdfs dfs -ls -t).
@@ -557,24 +764,24 @@ push_named_latest_logs() {
 
    case "${SERVICE}" in
       hiveserver2)
-         if main="$(find_newest_log 'hiveserver2*.log')"; then
+         if main="$(find_newest_main_log)"; then
             if push_log_snapshot "${dest}" "hiveserver2" "${stamp}" "${main}" "hiveserver2.log"; then
                pushed=1
             fi
          fi
-         if gc="$(find_newest_log 'gc-hiveserver2*.log')"; then
+         if gc="$(find_newest_gc_log)"; then
             if push_log_snapshot "${dest}" "gc" "${stamp}" "${gc}" "hiveserver2-gc.log"; then
                pushed=1
             fi
          fi
          ;;
       metastore)
-         if main="$(find_newest_log 'hivemetastore*.log')"; then
+         if main="$(find_newest_main_log)"; then
             if push_log_snapshot "${dest}" "hivemetastore" "${stamp}" "${main}" "hivemetastore.log"; then
                pushed=1
             fi
          fi
-         if gc="$(find_newest_log 'gc-metastore*.log')"; then
+         if gc="$(find_newest_gc_log)"; then
             if push_log_snapshot "${dest}" "gc" "${stamp}" "${gc}" "hivemetastore-gc.log"; then
                pushed=1
             fi
@@ -703,6 +910,7 @@ do_push() {
       echo "hdfs-log-sync: pushed ${dest}/archive-${stamp}.tgz"
    fi
    rm -f "${tmp}"
+   prune_local_log_files || true
    return "${archive_status}"
 }
 
@@ -725,7 +933,7 @@ push() {
 }
 
 do_restore() {
-   local dest archive_path archive_name tmp
+   local dest archive_path tmp tmpdir f base
 
    [ -n "${HIVE_LOG_HDFS_BASE}" ] || return 0
 
@@ -735,7 +943,6 @@ do_restore() {
       echo "hdfs-log-sync: no archive-*.tgz under ${dest}"
       return 0
    fi
-   archive_name="${archive_path##*/}"
 
    tmp="/tmp/hive-logs-restore-${HOST_ID}.tgz"
    if ! hdfs dfs -get "${archive_path}" "${tmp}"; then
@@ -743,10 +950,38 @@ do_restore() {
       return 1
    fi
 
-   mkdir -p "${HIVE_LOG_DIR}"
-   tar -xzf "${tmp}" -C "${HIVE_HOME}" 2>/dev/null || true
+   tmpdir="$(mktemp -d)"
+   if ! tar -xzf "${tmp}" -C "${tmpdir}" 2>/dev/null; then
+      rm -f "${tmp}"
+      rm -rf "${tmpdir}"
+      echo "hdfs-log-sync: extract failed for ${archive_path}" >&2
+      return 1
+   fi
    rm -f "${tmp}"
-   echo "hdfs-log-sync: restored ${archive_path} into ${HIVE_HOME}"
+
+   mkdir -p "${HIVE_LOG_DIR}"
+   if [ "${SERVICE}" = "hiveserver2" ] && [ -d "${tmpdir}/tez_logs" ]; then
+      mkdir -p "${TEZ_LOG_CACHE_DIR}"
+      shopt -s nullglob
+      for f in "${tmpdir}"/tez_logs/application_*.log; do
+         base="$(basename "${f}")"
+         cp "${f}" "${TEZ_LOG_CACHE_DIR}/${base}" 2>/dev/null || true
+      done
+      shopt -u nullglob
+   fi
+   if [ "${SERVICE}" = "llapdaemon" ] && [ -d "${tmpdir}/llap_logs" ]; then
+      mkdir -p "${LLAP_LOG_CACHE_DIR}"
+      shopt -s nullglob
+      for f in "${tmpdir}"/llap_logs/application_*.log; do
+         base="$(basename "${f}")"
+         cp "${f}" "${LLAP_LOG_CACHE_DIR}/${base}" 2>/dev/null || true
+      done
+      shopt -u nullglob
+   fi
+
+   rm -rf "${tmpdir}"
+   prune_local_log_files || true
+   echo "hdfs-log-sync: restored tez/llap caches from ${archive_path} (log tree not rehydrated)"
    return 0
 }
 

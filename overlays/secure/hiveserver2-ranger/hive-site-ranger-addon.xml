@@ -1,0 +1,12 @@
+      <property>
+         <name>hive.security.authorization.enabled</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.security.authorization.manager</name>
+         <value>org.apache.ranger.authorization.hive.authorizer.RangerHiveAuthorizerFactory</value>
+      </property>
+      <property>
+         <name>hive.security.authenticator.manager</name>
+         <value>org.apache.hadoop.hive.ql.security.SessionStateUserAuthenticator</value>
+      </property>

@@ -31,6 +31,7 @@ function help(){
    echo "        hiveCtl stop    <overlay> <component>"
    echo "        hiveCtl backup  <overlay> [<backup-dir>]"
    echo "        hiveCtl restore <overlay> <backup-dir>"
+   echo "  secure backup also writes mysql-ranger.sql when Ranger Admin has been started (policy DB)."
    echo "        hiveCtl cleanup <overlay>"
    echo "        hiveCtl disk   (check Kind node /var space; prune container images if low)"
    echo "        hiveCtl resync-keytabs <overlay>   (secure: refresh Secret kerberos-keytabs from KDC PVC)"
@@ -52,6 +53,10 @@ function help(){
    echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
    echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
    echo "Ranger (secure, optional): HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure   or: ./hiveCtl.sh start secure ranger"
+   echo "Ranger Hive plugin (secure HS2 Phase 2): build docker/hive-ranger, then HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2"
+   echo "  Image: HIVE_RANGER_IMAGE=hive-on-k8s/hive-ranger:2.4.0-nightly (default)"
+   echo "  Kind: hiveCtl runs 'kind load docker-image' for that tag when present locally (HIVECTL_KIND_LOAD=0 to skip)"
+   echo "  Kind cluster name: HIVECTL_KIND_CLUSTER_NAME or KIND_CLUSTER (else inferred from node name, e.g. desktop)"
    echo "Disk: before start/restore, hiveCtl checks Kind /var on all nodes (mini, llap, secure, standalone)"
    echo "  Prune when use exceeds threshold: HIVECTL_DISK_MAX_USE_PERCENT=90 (HIVECTL_DISK_CHECK=0 to skip)"
 }
@@ -581,6 +586,26 @@ function waitForStopped(){
 
    waitForDeleted 180 statefulsets,deployments,pods -n "${namespace}" --selector="app=${service}"
 }
+# secure HS2: default overlay or Phase 2 Ranger authorizer (HIVECTL_SECURE_RANGER_HS2=1).
+function secureHiveserver2OverlayPath(){
+   if [ "${HIVECTL_SECURE_RANGER_HS2:-0}" = "1" ]; then
+      echo "./overlays/secure/hiveserver2-ranger/"
+   else
+      echo "./overlays/secure/hiveserver2/"
+   fi
+}
+function applyOverlayKustomize(){
+   local overlay_path="$1"
+   local manifest=""
+   local ranger_image=""
+
+   manifest="$(kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone)" || return 1
+   if [[ "${overlay_path}" == *hiveserver2-ranger* ]]; then
+      ranger_image="${HIVE_RANGER_IMAGE:-hive-on-k8s/hive-ranger:2.4.0-nightly}"
+      manifest="$(printf '%s\n' "${manifest}" | sed "s|image: hive-on-k8s/hive-ranger:2.4.0-nightly|image: ${ranger_image}|g")"
+   fi
+   printf '%s\n' "${manifest}" | kubectl apply -f -
+}
 # Start one overlay/component and wait for its pod readiness.
 function startOverlay(){
    #
@@ -592,7 +617,18 @@ function startOverlay(){
    local namespace="${target%_*}"
    local service="${target#*_}"
 
+   if [ "${target}" = "secure_hiveserver2" ]; then
+      overlay_path="$(secureHiveserver2OverlayPath)"
+      if [ "${HIVECTL_SECURE_RANGER_HS2:-0}" = "1" ]; then
+         echo "HS2 overlay: Ranger Hive plugin (Phase 2); image ${HIVE_RANGER_IMAGE:-hive-on-k8s/hive-ranger:2.4.0-nightly}"
+      fi
+   fi
+
    ensureClusterDiskSpaceOnce
+
+   if [ "${target}" = "secure_hiveserver2" ]; then
+      ensureSecureRangerHs2KindImage || return 1
+   fi
 
    if [ "${target}" = "secure_hadoop-namenode" ]; then
       overlayActive "secure_hadoop-namenode"
@@ -661,8 +697,7 @@ function startOverlay(){
                   reinitRangerDatabase "${namespace}" || return 1
                fi
             fi
-            #kubectl apply -k "${overlay_path}"
-            kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
+            applyOverlayKustomize "${overlay_path}" || return 1
             if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
                waitForRangerMysqlInit "${namespace}" || return 1
             fi
@@ -1302,6 +1337,58 @@ function pruneKindNodeImages(){
 
    docker exec "${node}" crictl rmi --prune 2>/dev/null
 }
+# Kind cluster name for "kind load" (Docker Desktop cluster is often "desktop", not "kind").
+function kindClusterName(){
+   local name="${HIVECTL_KIND_CLUSTER_NAME:-${KIND_CLUSTER:-}}"
+   local node=""
+   local clusters=""
+
+   if [ -n "${name}" ]; then
+      printf '%s\n' "${name}"
+      return 0
+   fi
+   if command -v kind >/dev/null 2>&1; then
+      clusters="$(kind get clusters 2>/dev/null || true)"
+      if [ "$(printf '%s\n' "${clusters}" | sed '/^$/d' | wc -l | tr -d ' ')" = "1" ]; then
+         printf '%s\n' "${clusters}" | sed '/^$/d' | head -1
+         return 0
+      fi
+   fi
+   node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)" || return 1
+   case "${node}" in
+      *-control-plane)
+         printf '%s\n' "${node%-control-plane}"
+         return 0
+         ;;
+   esac
+   return 1
+}
+# Copy a locally built image into every Kind node (avoids docker.io pull for custom tags).
+function ensureKindLocalImage(){
+   local image="$1"
+   local cluster=""
+
+   case "${HIVECTL_KIND_LOAD:-1}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+   esac
+   command -v docker >/dev/null 2>&1 || return 0
+   command -v kind >/dev/null 2>&1 || return 0
+   if ! docker image inspect "${image}" >/dev/null 2>&1; then
+      echo "hiveCtl: local Docker image not found: ${image}" >&2
+      echo "hiveCtl: build it first (see docker/hive-ranger/README.md), or set HIVE_RANGER_IMAGE to a pullable tag." >&2
+      return 1
+   fi
+   cluster="$(kindClusterName)" || {
+      echo "hiveCtl: skip kind load for ${image} (Kind cluster name unknown; set HIVECTL_KIND_CLUSTER_NAME)" >&2
+      return 0
+   }
+   echo "hiveCtl: kind load docker-image ${image} --name ${cluster}"
+   kind load docker-image "${image}" --name "${cluster}" || return 1
+}
+function ensureSecureRangerHs2KindImage(){
+   [ "${HIVECTL_SECURE_RANGER_HS2:-0}" = "1" ] || return 0
+   ensureKindLocalImage "${HIVE_RANGER_IMAGE:-hive-on-k8s/hive-ranger:2.4.0-nightly}"
+}
 function reportKindNodeDisk(){
    local node="$1"
    local use=""
@@ -1831,12 +1918,109 @@ function stackCleanupPvcs(){
          ;;
    esac
 }
+# Return 0 when MySQL in the namespace contains the given database.
+function mysqlDatabaseExists(){
+   local namespace="$1"
+   local db="$2"
+
+   kubectl exec mysql-0 -n "${namespace}" -- \
+      sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e "SHOW DATABASES"' 2>/dev/null \
+      | grep -qx "${db}"
+}
+# Stop Ranger Admin during backup/restore so the policy database is quiescent (secure only).
+function stopRangerIfActive(){
+   local namespace="$1"
+   local stopped_var="$2"
+   local stopped=0
+
+   printf -v "${stopped_var}" "0"
+   [ "${namespace}" = "secure" ] || return 0
+   overlayActive "secure_ranger"
+   case $? in
+      0)
+         stopOverlay "secure_ranger" || return 1
+         stopped=1
+         ;;
+      1|2) ;;
+   esac
+   printf -v "${stopped_var}" "${stopped}"
+   return 0
+}
+# Start Ranger Admin after backup/restore when it was stopped for MySQL consistency.
+function startRangerIfStopped(){
+   local namespace="$1"
+   local was_stopped="$2"
+
+   [ "${was_stopped}" = "1" ] || return 0
+   [ "${namespace}" = "secure" ] || return 0
+   startOverlay "secure_ranger" || return 1
+}
+# Dump Ranger policy/service data from MySQL (secure, when ranger DB exists).
+function backupRangerDatabase(){
+   local namespace="$1"
+   local backup_dir="$2"
+
+   [ "${namespace}" = "secure" ] || return 0
+   if ! mysqlDatabaseExists "${namespace}" ranger; then
+      echo "Skipping Ranger backup (no ranger database in MySQL; start './hiveCtl.sh start secure ranger' first)"
+      return 0
+   fi
+   echo "Backing up MySQL ranger database (Ranger policies and services) ..."
+   # shellcheck disable=SC2016
+   kubectl exec mysql-0 -n "${namespace}" -- \
+      sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --events --databases ranger' \
+      > "${backup_dir}/mysql-ranger.sql" || return 1
+}
+# Create ranger DB/user on mysql-0 before importing mysql-ranger.sql (fresh PVC after cleanup).
+function ensureRangerMysqlForRestore(){
+   local namespace="$1"
+   local backup_dir="$2"
+   local ranger_db_pw=""
+
+   [ "${namespace}" = "secure" ] || return 0
+   [ -f "${backup_dir}/mysql-ranger.sql" ] || return 0
+   ensureSecrets "${namespace}" || return 1
+   ranger_db_pw="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.ranger-db-password}' 2>/dev/null | base64 -d 2>/dev/null)" || true
+   if [ -z "${ranger_db_pw}" ]; then
+      echo "Cannot restore Ranger policies: ranger-db-password missing in hive-credentials"
+      return 1
+   fi
+   echo "Ensuring Ranger MySQL database/user before policy restore ..."
+   # shellcheck disable=SC2016
+   kubectl exec mysql-0 -n "${namespace}" -- \
+      env RANGER_DB_PASSWORD="${ranger_db_pw}" \
+      sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" <<EOF
+CREATE DATABASE IF NOT EXISTS ranger CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '\''rangeradmin'\''@'\''%'\'' IDENTIFIED WITH mysql_native_password BY '\''${RANGER_DB_PASSWORD}'\'';
+ALTER USER '\''rangeradmin'\''@'\''%'\'' IDENTIFIED WITH mysql_native_password BY '\''${RANGER_DB_PASSWORD}'\'';
+GRANT ALL PRIVILEGES ON ranger.* TO '\''rangeradmin'\''@'\''%'\'';
+FLUSH PRIVILEGES;
+EOF' || return 1
+}
+# Restore Ranger policies from mysql-ranger.sql when present in the backup directory.
+function restoreRangerDatabase(){
+   local namespace="$1"
+   local backup_dir="$2"
+
+   [ "${namespace}" = "secure" ] || return 0
+   if [ ! -f "${backup_dir}/mysql-ranger.sql" ]; then
+      echo "No mysql-ranger.sql in backup (Ranger policies were not included)"
+      return 0
+   fi
+   ensureRangerMysqlForRestore "${namespace}" "${backup_dir}" || return 1
+   echo "Restoring MySQL ranger database (Ranger policies and services) ..."
+   # shellcheck disable=SC2016
+   kubectl exec -i mysql-0 -n "${namespace}" -- \
+      sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' \
+      < "${backup_dir}/mysql-ranger.sql" || return 1
+}
 # Back up MySQL metastore data and HDFS data to a local directory.
 function backupStack(){
    local namespace="$1"
    local backup_dir="${2:-}"
    local stopped_hms=0
    local stopped_hs2=0
+   local stopped_ranger=0
    local status=0
 
    if [ "${namespace}" = "standalone" ]; then
@@ -1857,6 +2041,7 @@ function backupStack(){
    backupSecrets "${namespace}" "${backup_dir}" || return 1
 
    stopHiveWriters "${namespace}" stopped_hms stopped_hs2 || return 1
+   stopRangerIfActive "${namespace}" stopped_ranger || return 1
 
    ensureHdfsOverlayReady "${namespace}" || status=1
    ensureOverlayReady "${namespace}" mysql || status=1
@@ -1870,6 +2055,10 @@ function backupStack(){
    fi
 
    if [ "${status}" -eq 0 ]; then
+      backupRangerDatabase "${namespace}" "${backup_dir}" || status=1
+   fi
+
+   if [ "${status}" -eq 0 ]; then
       echo "Backing up HDFS data ..."
       hdfsArchiveForBackup "${namespace}" || status=1
    fi
@@ -1880,6 +2069,7 @@ function backupStack(){
       kubectl cp "${namespace}/${hdfs_pod}:/tmp/hdfs-backup.tgz" "${backup_dir}/hdfs-backup.tgz" || status=1
    fi
 
+   startRangerIfStopped "${namespace}" "${stopped_ranger}" || status=1
    restartHiveWriters "${namespace}" "${stopped_hms}" "${stopped_hs2}" || status=1
 
    if [ "${status}" -eq 0 ]; then
@@ -1895,6 +2085,7 @@ function restoreStack(){
    local backup_dir="$2"
    local stopped_hms=0
    local stopped_hs2=0
+   local stopped_ranger=0
    local started_storage=0
    local component=""
    local status=0
@@ -1919,6 +2110,7 @@ function restoreStack(){
 
    echo "Restoring backup from: ${backup_dir}"
    stopHiveWriters "${namespace}" stopped_hms stopped_hs2 || return 1
+   stopRangerIfActive "${namespace}" stopped_ranger || return 1
 
    # Storage that isn't running is started now and the rest of the stack after the restore,
    # so on a fresh namespace the Metastore never creates an empty schema first
@@ -1953,6 +2145,10 @@ function restoreStack(){
    fi
 
    if [ "${status}" -eq 0 ]; then
+      restoreRangerDatabase "${namespace}" "${backup_dir}" || status=1
+   fi
+
+   if [ "${status}" -eq 0 ]; then
       echo "Restoring HDFS data ..."
       local hdfs_pod
       hdfs_pod="$(hdfsBackupPod "${namespace}")"
@@ -1964,9 +2160,11 @@ function restoreStack(){
    fi
 
    if [ "${started_storage}" = "0" ]; then
+      startRangerIfStopped "${namespace}" "${stopped_ranger}" || status=1
       restartHiveWriters "${namespace}" "${stopped_hms}" "${stopped_hs2}" || status=1
    elif [ "${status}" -eq 0 ]; then
       startStack "${namespace}" || status=1
+      startRangerIfStopped "${namespace}" "${stopped_ranger}" || status=1
    fi
 
    if [ "${status}" -eq 0 ]; then
