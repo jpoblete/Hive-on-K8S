@@ -91,6 +91,10 @@ Ranger stores policies in MySQL database **`ranger`** on **`mysql-0`**. **`./hiv
 
 After restore with Phase 2 HS2, rebuild/load the custom image if Kind pruned it (`docker/hive-ranger/README.md`), then **`HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2`**. Wait ~30s for policy poll or restart HS2 before testing authorization.
 
+**Localhost UIs:** **`restore`** and **`start secure`** call **`ensureProfileUiPortForwards`** so **Hue** (`http://localhost:8888/`) and **Ranger** (`http://localhost:6080/login.jsp`) get **`kubectl port-forward`** plus the background monitor (same as starting **`hue`** / **`ranger`** alone). Disable with **`HIVECTL_HUE_PORT_FORWARD=0`** / **`HIVECTL_RANGER_PORT_FORWARD=0`**.
+
+If the backup has no **`secure_hive`** service yet (empty **`x_service`** in **`mysql-ranger.sql`**), create that Hive service in the Ranger UI once, then run **`./scripts/secure-ranger-admin-default-and-owner.sh secure`** before HS2 authorization smoke tests.
+
 ## Architecture (target)
 
 ```text

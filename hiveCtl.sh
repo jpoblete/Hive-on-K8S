@@ -1487,6 +1487,27 @@ function startStack(){
    for component in "${components[@]}"; do
       startOverlay "${namespace}_${component}" || return 1
    done
+   ensureProfileUiPortForwards "${namespace}" || true
+}
+# Start or refresh localhost port-forwards for Hue / Ranger after full stack or restore.
+function ensureProfileUiPortForwards(){
+   local namespace="$1"
+
+   case "${namespace}" in
+      secure)
+         if kubectl get svc ranger -n "${namespace}" >/dev/null 2>&1; then
+            ensureRangerPortForward "${namespace}" || true
+         fi
+         if profileHasHue "${namespace}" && kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
+            ensureHuePortForward "${namespace}" || true
+         fi
+         ;;
+      llap)
+         if profileHasHue "${namespace}" && kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
+            ensureHuePortForward "${namespace}" || true
+         fi
+         ;;
+   esac
 }
 # Stop all components in reverse dependency order.
 function stopStack(){
@@ -2167,6 +2188,7 @@ function restoreStack(){
       startRangerIfStopped "${namespace}" "${stopped_ranger}" || status=1
    fi
 
+   ensureProfileUiPortForwards "${namespace}" || true
    if [ "${status}" -eq 0 ]; then
       echo "Restore complete: ${backup_dir}"
    else
