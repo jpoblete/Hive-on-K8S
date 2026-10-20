@@ -18,6 +18,8 @@ For day-to-day commands, see [README.md](../README.md) (profiles, `hiveCtl`, smo
 
 Stack order: **`krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue`**.
 
+**Optional:** [Apache Ranger](secure-ranger.md) Phase 1 (Admin UI) — `./hiveCtl.sh start secure ranger` or **`HIVECTL_SECURE_RANGER=1`**. Hive/HDFS plugins not wired yet. For Ranger authorization, **`hive.server2.enable.doAs=false`** and **`hive.metastore.execute.setugi=false`** (already set in the secure overlay; see [secure-ranger.md](secure-ranger.md)).
+
 ## Kerberos ZooKeeper
 
 LLAP on **Hive 4.3** (`apache/hive:nightly`) uses a ZooKeeper-backed delegation-token secret manager for LLAP with **`zkAuthType=sasl`**. Plain ZooKeeper (as in **`llap`**) is not sufficient for secure LLAP daemons.

@@ -1,0 +1,49 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# One-shot: create ranger DB/user on mysql-0 (safe to re-apply).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ranger-mysql-init
+  namespace: secure
+  labels:
+    app: ranger
+spec:
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mysql-init
+          image: mysql:8.4
+          env:
+            - name: MYSQL_HOST
+              value: mysql.secure.svc.cluster.local
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: mysql-root-password
+            - name: RANGER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: ranger-db-password
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              export MYSQL_PWD="${MYSQL_ROOT_PASSWORD}"
+              until mysqladmin ping -h "${MYSQL_HOST}" -uroot --silent; do
+                echo "waiting for mysql..."
+                sleep 3
+              done
+              mysql -h "${MYSQL_HOST}" -uroot <<EOF
+              CREATE DATABASE IF NOT EXISTS ranger CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+              CREATE USER IF NOT EXISTS 'rangeradmin'@'%' IDENTIFIED WITH mysql_native_password BY '${RANGER_DB_PASSWORD}';
+              ALTER USER 'rangeradmin'@'%' IDENTIFIED WITH mysql_native_password BY '${RANGER_DB_PASSWORD}';
+              GRANT ALL PRIVILEGES ON ranger.* TO 'rangeradmin'@'%';
+              FLUSH PRIVILEGES;
+              EOF
+              echo "ranger MySQL schema ready"
+#EOF

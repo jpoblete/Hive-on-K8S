@@ -1,0 +1,66 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Phase 1: run setup + Tomcat only (skip create-ranger-services.py demo bootstrap).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ranger
+spec:
+  template:
+    spec:
+      containers:
+        - name: ranger
+          env:
+            - name: RANGER_SUPPORTED_COMPONENTS
+              value: hive,hdfs
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              set -euo pipefail
+              RANGER_HOME=/opt/ranger
+              if [ ! -f "${RANGER_HOME}/.setupDone" ]; then
+                cd "${RANGER_HOME}/admin"
+                if ! ./setup.sh; then
+                  echo "Ranger setup.sh failed; see ${RANGER_HOME}/admin/logfile"
+                  exit 1
+                fi
+                touch "${RANGER_HOME}/.setupDone"
+              fi
+              supported="${RANGER_SUPPORTED_COMPONENTS:-hive,hdfs}"
+              conf_dir="${RANGER_HOME}/admin/ews/webapp/WEB-INF/classes/conf"
+              for admin_site in "${conf_dir}/ranger-admin-site.xml" "${conf_dir}/ranger-admin-default-site.xml"; do
+                if [ -f "${admin_site}" ]; then
+                  sed -i "/ranger.supportedcomponents/{n;s|<value[^>]*>.*</value>|<value>${supported}</value>|;s|<value />|<value>${supported}</value>|;}" "${admin_site}"
+                fi
+              done
+              cd "${RANGER_HOME}/admin"
+              ./ews/ranger-admin-services.sh start
+              pid="$(ps -ef | grep -v grep | grep 'org.apache.ranger.server.tomcat.EmbeddedServer' | awk '{print $2}')"
+              if [ -z "${pid}" ]; then
+                echo "Ranger Admin JVM did not start; see ews/logs/catalina.out"
+                exit 1
+              fi
+              tail --pid="${pid}" -f /dev/null
+          startupProbe:
+            httpGet:
+              path: /login.jsp
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /login.jsp
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /login.jsp
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 6
+#EOF

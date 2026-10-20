@@ -37,7 +37,11 @@
       </property>
       <property>
          <name>hive.metastore.execute.setugi</name>
-         <value>true</value>
+         <value>false</value>
+      </property>
+      <property>
+         <name>hive.metastore.event.db.notification.api.auth</name>
+         <value>false</value>
       </property>
       <property>
          <name>hive.llap.daemon.service.principal</name>

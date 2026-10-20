@@ -1,0 +1,21 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# install.properties for apache/ranger image (MySQL). Placeholders replaced in secure overlay.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ranger
+  namespace: default
+  labels:
+    app: ranger
+data:
+  hadoop-core-site.xml: |
+    <?xml version="1.0" encoding="UTF-8"?>
+    <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+    <configuration></configuration>
+  mysql-init.sql: |
+    CREATE DATABASE IF NOT EXISTS ranger CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE USER IF NOT EXISTS 'rangeradmin'@'%' IDENTIFIED BY '__RANGER_DB_PASSWORD__';
+    GRANT ALL PRIVILEGES ON ranger.* TO 'rangeradmin'@'%';
+    FLUSH PRIVILEGES;
+#EOF

@@ -1,0 +1,15 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Ranger 2.4 JISQL (Java 8) connects without allowPublicKeyRetrieval; enable legacy auth plugin for rangeradmin.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+spec:
+  template:
+    spec:
+      containers:
+        - name: mysql
+          args:
+            - --mysql-native-password=ON
+#EOF

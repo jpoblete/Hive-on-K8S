@@ -1,0 +1,85 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ranger
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: fetch-mysql-jdbc
+          image: curlimages/curl:8.5.0
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              curl -fsSL -o /jdbc/mysql-connector.jar \
+                https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/8.3.0/mysql-connector-j-8.3.0.jar
+              test -s /jdbc/mysql-connector.jar
+          volumeMounts:
+            - name: ranger-jdbc
+              mountPath: /jdbc
+        - name: render-install-properties
+          image: busybox:1.36
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: mysql-root-password
+            - name: RANGER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: ranger-db-password
+            - name: RANGER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: ranger-admin-password
+            - name: MYSQL_HOST
+              value: mysql.secure.svc.cluster.local
+            - name: RANGER_EXTERNAL_URL
+              value: http://127.0.0.1:6080
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              sed \
+                -e "s|__MYSQL_ROOT_PASSWORD__|${MYSQL_ROOT_PASSWORD}|g" \
+                -e "s|__RANGER_DB_PASSWORD__|${RANGER_DB_PASSWORD}|g" \
+                -e "s|__RANGER_ADMIN_PASSWORD__|${RANGER_ADMIN_PASSWORD}|g" \
+                -e "s|__MYSQL_HOST__|${MYSQL_HOST}|g" \
+                -e "s|__RANGER_EXTERNAL_URL__|${RANGER_EXTERNAL_URL}|g" \
+                /tmpl/install.properties.template > /out/install.properties
+          volumeMounts:
+            - name: ranger-install-tmpl
+              mountPath: /tmpl/install.properties.template
+              subPath: install.properties.template
+              readOnly: true
+            - name: ranger-install-rendered
+              mountPath: /out
+      containers:
+        - name: ranger
+          volumeMounts:
+            - name: ranger-install-rendered
+              mountPath: /opt/ranger/admin/install.properties
+              subPath: install.properties
+              readOnly: true
+            - name: ranger-jdbc
+              mountPath: /opt/ranger/jdbc
+              readOnly: true
+            - name: ranger-install
+              $patch: delete
+      volumes:
+        - name: ranger-jdbc
+          emptyDir: {}
+        - name: ranger-install-tmpl
+          configMap:
+            name: ranger
+        - name: ranger-install-rendered
+          emptyDir: {}
+        - name: ranger-install
+          $patch: delete
+#EOF

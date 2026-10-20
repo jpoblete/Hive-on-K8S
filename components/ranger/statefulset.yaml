@@ -1,0 +1,70 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: ranger
+  name: ranger
+  namespace: default
+spec:
+  replicas: 1
+  serviceName: ranger-headless
+  selector:
+    matchLabels:
+      app: ranger
+  template:
+    metadata:
+      labels:
+        app: ranger
+    spec:
+      serviceAccountName: ranger
+      automountServiceAccountToken: false
+      setHostnameAsFQDN: true
+      containers:
+        - name: ranger
+          image: apache/ranger:2.4.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RANGER_HOME
+              value: /opt/ranger
+            - name: RANGER_SCRIPTS
+              value: /home/ranger/scripts
+          ports:
+            - name: http
+              containerPort: 6080
+          volumeMounts:
+            - name: ranger-install
+              mountPath: /opt/ranger/admin/install.properties
+              subPath: install.properties
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /login.jsp
+              port: http
+            periodSeconds: 15
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /login.jsp
+              port: http
+            periodSeconds: 15
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /login.jsp
+              port: http
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1536Mi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+      volumes:
+        - name: ranger-install
+          configMap:
+            name: ranger
+#EOF

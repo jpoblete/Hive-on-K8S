@@ -175,7 +175,7 @@ standalone  →  mini  →  llap  →  secure
 
 | | |
 |--|--|
-| **Adds (on top of `llap`-shaped Hive)** | MIT KDC; **HDFS with three DataNodes** (`hadoop-datanode-0/1/2`, one pod per worker, **`dfs.replication=3`**); **Kerberos SASL ZooKeeper**; **LLAP×2, Hue, 2×** Metastore & HiveServer2 (same scale as **`llap`**, all Kerberos-enabled) |
+| **Adds (on top of `llap`-shaped Hive)** | MIT KDC; **HDFS with three DataNodes** (`hadoop-datanode-0/1/2`, one pod per worker, **`dfs.replication=3`**); **Kerberos SASL ZooKeeper**; **LLAP×2, Hue, 2×** Metastore & HiveServer2 (same scale as **`llap`**, all Kerberos-enabled). **Ranger:** design only — [docs/secure-ranger.md](docs/secure-ranger.md) |
 | **Image** | `apache/hive:nightly` (see [Images by profile](#images-by-profile)) |
 | **Hive tier** | **2** Metastore · **2** HiveServer2 · **2** LLAP daemons (same as **`llap`**, Kerberos-enabled) |
 | **Stack** | `krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue` |

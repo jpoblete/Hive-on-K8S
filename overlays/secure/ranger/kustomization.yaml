@@ -1,0 +1,49 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Phase 1: Ranger Admin only (no Hive/HDFS plugins yet). Opt-in: HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: secure
+resources:
+  - mysql-init-job.yaml
+  - ../../../components/ranger
+patches:
+  - path: statefulset-init.yaml
+  - path: statefulset-hadoop-conf.yaml
+  - path: statefulset-startup.yaml
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: ServiceAccount
+      name: ranger
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: Service
+      name: ranger
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: Service
+      name: ranger-headless
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: ConfigMap
+      name: ranger
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: secure
+    target:
+      kind: StatefulSet
+      name: ranger
+#EOF

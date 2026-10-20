@@ -1,0 +1,16 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - service.yaml
+  - headless-service.yaml
+  - statefulset.yaml
+configMapGenerator:
+  - name: ranger
+    behavior: merge
+    files:
+      - install.properties.template
+#EOF

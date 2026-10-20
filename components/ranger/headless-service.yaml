@@ -1,0 +1,18 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: Service
+metadata:
+  name: ranger-headless
+  namespace: default
+  labels:
+    app: ranger
+spec:
+  clusterIP: None
+  selector:
+    app: ranger
+  ports:
+    - name: http
+      port: 6080
+      targetPort: 6080
+#EOF

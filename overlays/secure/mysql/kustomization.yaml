@@ -5,7 +5,8 @@ kind: Kustomization
 resources:
   - serviceaccount.yaml
   - ../../../components/mysql
-patches:  
+patches:
+  - path: statefulset-ranger-jdbc.yaml  
   - patch: |-
       - op: replace
         path: /metadata/namespace

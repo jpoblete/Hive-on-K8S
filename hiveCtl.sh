@@ -34,16 +34,24 @@ function help(){
    echo "        hiveCtl cleanup <overlay>"
    echo "        hiveCtl disk   (check Kind node /var space; prune container images if low)"
    echo "        hiveCtl resync-keytabs <overlay>   (secure: refresh Secret kerberos-keytabs from KDC PVC)"
-   echo "        hiveCtl status"
+   echo "        hiveCtl list passwd [<overlay>]    (password aliases; with overlay, keys present in hive-credentials)"
+   echo "        hiveCtl get passwd <overlay> <alias>   (print one password from hive-credentials)"
+   echo "        hiveCtl get passwd <alias>             (same; overlay defaults to secure, or HIVECTL_PASSWD_OVERLAY)"
+   echo "        hiveCtl status   (active components and ready/total pod counts)"
    echo ""
    echo "Hue (llap|secure): after start, hiveCtl tries http://localhost:8888 automatically"
    echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
    echo "  While hue-0 is Ready, a background monitor restarts port-forward every minute if localhost stops responding"
    echo "  Disable forward: HIVECTL_HUE_PORT_FORWARD=0   Port: HIVECTL_HUE_LOCAL_PORT=8888"
    echo "  Disable monitor: HIVECTL_HUE_PORT_FORWARD_MONITOR=0   Interval: HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL=60"
+   echo "Ranger Admin (secure): after 'start secure ranger', hiveCtl tries http://localhost:6080/login.jsp"
+   echo "  Same port-forward + monitor pattern as Hue. Disable: HIVECTL_RANGER_PORT_FORWARD=0"
+   echo "  Port: HIVECTL_RANGER_LOCAL_PORT=6080   Monitor: HIVECTL_RANGER_PORT_FORWARD_MONITOR=0"
+   echo "  Login: admin + password from: kubectl get secret hive-credentials -n secure -o jsonpath='{.data.ranger-admin-password}' | base64 -d; echo"
    echo "LLAP daemon UI: http://localhost:15002 after start llapdaemon (pod llapdaemon-0)"
    echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
    echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
+   echo "Ranger (secure, optional): HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure   or: ./hiveCtl.sh start secure ranger"
    echo "Disk: before start/restore, hiveCtl checks Kind /var on all nodes (mini, llap, secure, standalone)"
    echo "  Prune when use exceeds threshold: HIVECTL_DISK_MAX_USE_PERCENT=90 (HIVECTL_DISK_CHECK=0 to skip)"
 }
@@ -99,6 +107,21 @@ function generatePassword(){
    else
       date "+%s%N"
    fi
+}
+# Ranger UI/DB passwords must include upper, lower, and digit (see setup.sh validatePassword).
+function generateRangerPassword(){
+   local suffix=""
+   suffix="$(generatePassword)"
+   printf 'Ra%s' "${suffix:0:29}"
+}
+function rangerPasswordMeetsPolicy(){
+   local password="$1"
+   [ "${#password}" -ge 8 ] || return 1
+   [[ "${password}" =~ [A-Z] ]] || return 1
+   [[ "${password}" =~ [a-z] ]] || return 1
+   [[ "${password}" =~ [0-9] ]] || return 1
+   case "${password}" in *[\`\'\"]* ) return 1 ;; esac
+   return 0
 }
 # Create the namespace-local Secret used by bootstrap scripts when absent.
 function ensureSecrets(){
@@ -279,6 +302,56 @@ function ensureHueSecrets(){
    kubectl patch secret hive-credentials -n "${namespace}" --type merge \
       -p "{\"stringData\":{\"hue-mysql-password\":\"${hue_mysql_password}\",\"hue-secret-key\":\"${hue_secret_key}\"}}" >/dev/null
 }
+# Ranger Admin DB + UI passwords (secure profile, opt-in component).
+function ensureRangerSecrets(){
+   local namespace="$1"
+   local ranger_db_password=""
+   local ranger_admin_password=""
+   local existing=""
+
+   [ "${namespace}" = "secure" ] || return 0
+   ensureSecrets "${namespace}" || return 1
+   existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.ranger-db-password}' 2>/dev/null)" || return 1
+   if [ -z "${existing}" ]; then
+      ranger_db_password="$(generatePassword)"
+      ranger_admin_password="$(generateRangerPassword)"
+      kubectl patch secret hive-credentials -n "${namespace}" --type merge \
+         -p "{\"stringData\":{\"ranger-db-password\":\"${ranger_db_password}\",\"ranger-admin-password\":\"${ranger_admin_password}\"}}" >/dev/null
+      return 0
+   fi
+   ranger_admin_password="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.ranger-admin-password}' 2>/dev/null | base64 -d 2>/dev/null)"
+   if rangerPasswordMeetsPolicy "${ranger_admin_password}"; then
+      return 0
+   fi
+   ranger_admin_password="$(generateRangerPassword)"
+   echo "Updating ranger-admin-password in hive-credentials (Ranger requires upper+lower+digit)."
+   kubectl patch secret hive-credentials -n "${namespace}" --type merge \
+      -p "{\"stringData\":{\"ranger-admin-password\":\"${ranger_admin_password}\"}}" >/dev/null
+}
+# Drop Ranger schema and allow setup.sh to run again (HIVECTL_RANGER_REINIT=1).
+function reinitRangerDatabase(){
+   local namespace="$1"
+
+   [ "${namespace}" = "secure" ] || return 0
+   if ! kubectl get svc mysql -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+   echo "Reinitializing Ranger MySQL database (HIVECTL_RANGER_REINIT=1) ..."
+   kubectl exec -n "${namespace}" mysql-0 -- sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS ranger; CREATE DATABASE ranger CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"' || return 1
+   if kubectl get pod ranger-0 -n "${namespace}" >/dev/null 2>&1; then
+      kubectl exec -n "${namespace}" ranger-0 -c ranger -- rm -f /opt/ranger/.setupDone 2>/dev/null || true
+   fi
+}
+# Wait for ranger-mysql-init Job after first apply.
+function waitForRangerMysqlInit(){
+   local namespace="$1"
+
+   [ "${namespace}" = "secure" ] || return 0
+   if ! kubectl get job ranger-mysql-init -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+   kubectl wait --for=condition=complete job/ranger-mysql-init -n "${namespace}" --timeout=300s
+}
 # Save the generated namespace credentials in a portable backup manifest.
 function backupSecrets(){
    local namespace="$1"
@@ -329,7 +402,47 @@ function overlays(){
    #
    find ./overlays -name kustomization.yaml -type f -print | awk -F/ 'NF >= 4 {print $3"_"$4}' | sort
 }
-# List overlays that currently have an active StatefulSet.
+# Human-readable run state for one overlay workload (StatefulSet or Deployment name = service).
+function overlayComponentState(){
+   local namespace="$1"
+   local service="$2"
+   local ready=""
+   local desired=""
+   local not_ready_pods=""
+
+   if kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
+      desired="$(kubectl get statefulset "${service}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
+      ready="$(kubectl get statefulset "${service}" -n "${namespace}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
+   elif kubectl get deployment "${service}" -n "${namespace}" >/dev/null 2>&1; then
+      desired="$(kubectl get deployment "${service}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
+      ready="$(kubectl get deployment "${service}" -n "${namespace}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
+   else
+      echo "deployed (workload missing)"
+      return 1
+   fi
+
+   ready="${ready:-0}"
+   desired="${desired:-0}"
+
+   if [ "${desired}" -eq 0 ]; then
+      echo "stopped (0/0)"
+      return 1
+   fi
+   if [ "${ready}" -ge "${desired}" ]; then
+      echo "running (${ready}/${desired})"
+      return 0
+   fi
+
+   not_ready_pods="$(kubectl get pods -n "${namespace}" -l "app=${service}" --field-selector=status.phase!=Running --no-headers 2>/dev/null \
+      | awk '$3 ~ /CrashLoopBackOff|Error|Failed|ImagePullBackOff/ {print $3}' | head -1)"
+   if [ -n "${not_ready_pods}" ]; then
+      echo "failed (${ready}/${desired}, ${not_ready_pods})"
+      return 1
+   fi
+   echo "not ready (${ready}/${desired})"
+   return 1
+}
+# List overlays that currently have an active StatefulSet or Deployment.
 function activeOverlays(){
    #
    # Each Overlay lives in it's own Namespace of the same name
@@ -337,6 +450,9 @@ function activeOverlays(){
    local arg="${1:-}"
    local target=""
    local active_list=""
+   local namespace=""
+   local service=""
+   local state=""
    local status=0
 
    for target in $(overlays); do
@@ -352,6 +468,15 @@ function activeOverlays(){
 
    if [ -n "${arg}" ]; then
       echo "Active Overlays:"
+      printf "  %-28s %s\n" "COMPONENT" "STATE"
+      while IFS= read -r target; do
+         [ -n "${target}" ] || continue
+         namespace="${target%_*}"
+         service="${target#*_}"
+         state="$(overlayComponentState "${namespace}" "${service}")" || true
+         printf "  %-28s %s\n" "${target}" "${state:-unknown}"
+      done <<< "${active_list}"
+      return "${status}"
    fi
    printf "%s" "${active_list}"
    return "${status}"
@@ -421,7 +546,7 @@ function waitForReady(){
    local service="$2"
 
    local rollout_timeout="600s"
-   if [ "${service}" = "hadoop-namenode" ]; then
+   if [ "${service}" = "hadoop-namenode" ] || [ "${service}" = "ranger" ]; then
       rollout_timeout="1200s"
    fi
    if kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
@@ -499,6 +624,12 @@ function startOverlay(){
          if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
             ensureHueSecrets "${namespace}" || return 1
          fi
+         if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+            ensureRangerSecrets "${namespace}" || return 1
+            if [ "${HIVECTL_RANGER_REINIT:-0}" = "1" ]; then
+               reinitRangerDatabase "${namespace}" || return 1
+            fi
+         fi
          waitForReady "${namespace}" "${service}"
          if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
             ensureKerberosKeytabSecret "${namespace}" || return 1
@@ -524,8 +655,17 @@ function startOverlay(){
             if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
                ensureHueSecrets "${namespace}" || return 1
             fi
+            if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+               ensureRangerSecrets "${namespace}" || return 1
+               if [ "${HIVECTL_RANGER_REINIT:-0}" = "1" ]; then
+                  reinitRangerDatabase "${namespace}" || return 1
+               fi
+            fi
             #kubectl apply -k "${overlay_path}"
             kustomize build "${overlay_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f -
+            if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+               waitForRangerMysqlInit "${namespace}" || return 1
+            fi
             waitForReady "${namespace}" "${service}"
             if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
                ensureKerberosKeytabSecret "${namespace}" || return 1
@@ -541,6 +681,9 @@ function startOverlay(){
 
    if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
       ensureHuePortForward "${namespace}" || true
+   fi
+   if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+      ensureRangerPortForward "${namespace}" || true
    fi
    if [ "${service}" = "llapdaemon" ]; then
       case "${namespace}" in llap|secure) ensureLlapDaemonPortForward "${namespace}" || true ;; esac
@@ -585,6 +728,10 @@ function stopOverlay(){
    fi
    if [ "${service}" = "llapdaemon" ]; then
       case "${namespace}" in llap|secure) stopLlapDaemonPortForward "${namespace}" ;; esac
+   fi
+   if [ "${service}" = "ranger" ]; then
+      stopRangerPortForward "${namespace}"
+      kubectl delete job ranger-mysql-init -n "${namespace}" --ignore-not-found --wait=false || return 1
    fi
    resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${service}")" || return 1
    # Not forced: each pod gets its termination grace period to shut its services down cleanly
@@ -824,6 +971,232 @@ function ensureHuePortForward(){
    startHuePortForwardMonitor "${namespace}" || true
    return 1
 }
+function rangerPortForwardPidFile(){
+   local namespace="${1:-secure}"
+   echo "$(hiveCtlStateDir)/${namespace}-ranger-portforward.pid"
+}
+function rangerPortForwardMonitorPidFile(){
+   local namespace="${1:-secure}"
+   echo "$(hiveCtlStateDir)/${namespace}-ranger-portforward-monitor.pid"
+}
+function rangerLocalPort(){
+   echo "${HIVECTL_RANGER_LOCAL_PORT:-6080}"
+}
+function rangerPortForwardDisabled(){
+   case "${HIVECTL_RANGER_PORT_FORWARD:-auto}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function rangerPortForwardMonitorDisabled(){
+   case "${HIVECTL_RANGER_PORT_FORWARD_MONITOR:-1}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function rangerPodRunningAndReady(){
+   local namespace="${1:-secure}"
+   local phase=""
+   local ready=""
+
+   phase="$(kubectl get pod ranger-0 -n "${namespace}" -o jsonpath='{.status.phase}' 2>/dev/null)" || return 1
+   [ "${phase}" = "Running" ] || return 1
+   ready="$(kubectl get pod ranger-0 -n "${namespace}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" || return 1
+   [ "${ready}" = "True" ] || return 1
+}
+function rangerLocalUrlReachable(){
+   local port="$1"
+   local code=""
+
+   [ -n "${port}" ] || return 1
+   command -v curl >/dev/null 2>&1 || return 1
+   code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/login.jsp" --connect-timeout 2 2>/dev/null || echo 000)"
+   case "${code}" in
+      200|301|302|303|401|403|404) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function stopRangerPortForwardMonitor(){
+   local namespace="${1:-secure}"
+   local pidfile=""
+   local pid=""
+
+   pidfile="$(rangerPortForwardMonitorPidFile "${namespace}")"
+   [ -f "${pidfile}" ] || return 0
+   pid="$(cat "${pidfile}")"
+   if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+   fi
+   rm -f "${pidfile}"
+}
+function startRangerPortForwardProcess(){
+   local namespace="${1:-secure}"
+   local port=""
+   local pidfile=""
+   local pid=""
+
+   port="$(rangerLocalPort)"
+   pidfile="$(rangerPortForwardPidFile "${namespace}")"
+   mkdir -p "$(hiveCtlStateDir)"
+
+   if [ -f "${pidfile}" ]; then
+      pid="$(cat "${pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         if rangerLocalUrlReachable "${port}"; then
+            return 0
+         fi
+         kill "${pid}" 2>/dev/null || true
+         wait "${pid}" 2>/dev/null || true
+      fi
+      rm -f "${pidfile}"
+   fi
+
+   nohup kubectl port-forward "svc/ranger" -n "${namespace}" "${port}:6080" >/dev/null 2>&1 &
+   pid=$!
+   echo "${pid}" > "${pidfile}"
+   sleep 1
+   if kill -0 "${pid}" 2>/dev/null; then
+      return 0
+   fi
+   rm -f "${pidfile}"
+   return 1
+}
+function rangerPortForwardMonitorLoop(){
+   local namespace="${HIVECTL_RANGER_NAMESPACE:-secure}"
+   local interval=""
+   local port=""
+
+   interval="${HIVECTL_RANGER_PORT_FORWARD_MONITOR_INTERVAL:-60}"
+   while true; do
+      sleep "${interval}"
+      if rangerPortForwardDisabled; then
+         exit 0
+      fi
+      if rangerPortForwardMonitorDisabled; then
+         exit 0
+      fi
+      if ! kubectl get svc ranger -n "${namespace}" >/dev/null 2>&1; then
+         continue
+      fi
+      if ! rangerPodRunningAndReady "${namespace}"; then
+         continue
+      fi
+      port="$(rangerLocalPort)"
+      if rangerLocalUrlReachable "${port}"; then
+         continue
+      fi
+      echo "[hiveCtl] Ranger http://127.0.0.1:${port}/login.jsp unreachable while ranger-0 is Ready; restarting port-forward" >&2
+      if startRangerPortForwardProcess "${namespace}"; then
+         echo "[hiveCtl] Ranger port-forward restarted (pid $(cat "$(rangerPortForwardPidFile "${namespace}")" 2>/dev/null))" >&2
+      else
+         echo "[hiveCtl] Warning: could not restart Ranger port-forward to localhost:${port}" >&2
+      fi
+   done
+}
+function startRangerPortForwardMonitor(){
+   local namespace="${1:-secure}"
+   local monitor_pidfile=""
+   local logfile=""
+   local hivectl=""
+   local pid=""
+
+   if rangerPortForwardDisabled || rangerPortForwardMonitorDisabled; then
+      return 0
+   fi
+   if ! kubectl get svc ranger -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   monitor_pidfile="$(rangerPortForwardMonitorPidFile "${namespace}")"
+   if [ -f "${monitor_pidfile}" ]; then
+      pid="$(cat "${monitor_pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         return 0
+      fi
+      rm -f "${monitor_pidfile}"
+   fi
+
+   mkdir -p "$(hiveCtlStateDir)"
+   logfile="$(hiveCtlStateDir)/${namespace}-ranger-portforward-monitor.log"
+   hivectl="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+   nohup env HIVECTL_STATE_DIR="$(hiveCtlStateDir)" \
+      HIVECTL_RANGER_NAMESPACE="${namespace}" \
+      HIVECTL_RANGER_LOCAL_PORT="$(rangerLocalPort)" \
+      HIVECTL_RANGER_PORT_FORWARD="${HIVECTL_RANGER_PORT_FORWARD:-auto}" \
+      HIVECTL_RANGER_PORT_FORWARD_MONITOR="${HIVECTL_RANGER_PORT_FORWARD_MONITOR:-1}" \
+      HIVECTL_RANGER_PORT_FORWARD_MONITOR_INTERVAL="${HIVECTL_RANGER_PORT_FORWARD_MONITOR_INTERVAL:-60}" \
+      bash "${hivectl}" __ranger-portforward-monitor >>"${logfile}" 2>&1 &
+   pid=$!
+   echo "${pid}" > "${monitor_pidfile}"
+}
+function stopRangerPortForward(){
+   local namespace="${1:-secure}"
+   local pidfile=""
+   local pid=""
+
+   stopRangerPortForwardMonitor "${namespace}"
+   pidfile="$(rangerPortForwardPidFile "${namespace}")"
+   [ -f "${pidfile}" ] || return 0
+   pid="$(cat "${pidfile}")"
+   if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+   fi
+   rm -f "${pidfile}"
+}
+function rangerAdminPasswordHint(){
+   local namespace="${1:-secure}"
+   echo "Ranger login user: admin   password: kubectl get secret hive-credentials -n ${namespace} -o jsonpath='{.data.ranger-admin-password}' | base64 -d; echo"
+}
+function ensureRangerPortForward(){
+   local namespace="${1:-secure}"
+   local port=""
+   local pidfile=""
+   local pid=""
+
+   if rangerPortForwardDisabled; then
+      stopRangerPortForward "${namespace}"
+      echo "Ranger port-forward disabled (HIVECTL_RANGER_PORT_FORWARD=${HIVECTL_RANGER_PORT_FORWARD})"
+      return 0
+   fi
+
+   if ! kubectl get svc ranger -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   port="$(rangerLocalPort)"
+   pidfile="$(rangerPortForwardPidFile "${namespace}")"
+   mkdir -p "$(hiveCtlStateDir)"
+
+   if rangerLocalUrlReachable "${port}"; then
+      if [ -f "${pidfile}" ]; then
+         pid="$(cat "${pidfile}")"
+         if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            echo "Ranger Admin (${namespace}): http://localhost:${port}/login.jsp (port-forward pid ${pid})"
+         else
+            echo "Ranger Admin (${namespace}): http://localhost:${port}/login.jsp (already reachable; not starting port-forward)"
+         fi
+      else
+         echo "Ranger Admin (${namespace}): http://localhost:${port}/login.jsp (already reachable; not starting port-forward)"
+      fi
+      rangerAdminPasswordHint "${namespace}"
+      startRangerPortForwardMonitor "${namespace}" || true
+      return 0
+   fi
+
+   if startRangerPortForwardProcess "${namespace}"; then
+      pid="$(cat "${pidfile}")"
+      echo "Ranger Admin (${namespace}): http://localhost:${port}/login.jsp (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop ${namespace} ranger')"
+      rangerAdminPasswordHint "${namespace}"
+      startRangerPortForwardMonitor "${namespace}" || true
+      return 0
+   fi
+   echo "Warning: could not bind localhost:${port} for Ranger. Try: kubectl port-forward svc/ranger -n ${namespace} ${port}:6080" >&2
+   rangerAdminPasswordHint "${namespace}"
+   startRangerPortForwardMonitor "${namespace}" || true
+   return 1
+}
 function llapDaemonPortForwardPidFile(){
    local namespace="${1:-llap}"
    echo "$(hiveCtlStateDir)/${namespace}-llap-daemon-portforward.pid"
@@ -1013,7 +1386,11 @@ function startStack(){
          ensureHueSecrets "${namespace}" || return 1
          ensureAdminSecrets "${namespace}" || return 1
          llapNodeArchSummary
-         components=(krb5kdc hadoop-namenode mysql zookeeper hivemetastore llapdaemon hiveserver2 hue)
+         components=(krb5kdc hadoop-namenode mysql)
+         if [ "${HIVECTL_SECURE_RANGER:-0}" = "1" ]; then
+            components+=(ranger)
+         fi
+         components+=(zookeeper hivemetastore llapdaemon hiveserver2 hue)
          ;;
       *)
          components=(hadoop mysql hivemetastore hiveserver2)
@@ -1040,7 +1417,12 @@ function stopStack(){
          components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
          ;;
       secure)
-         components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop-namenode krb5kdc)
+         components=(hue hiveserver2 llapdaemon hivemetastore zookeeper)
+         overlayActive "secure_ranger"
+         if [ $? -eq 0 ]; then
+            components+=(ranger)
+         fi
+         components+=(mysql hadoop-namenode krb5kdc)
          ;;
       *)
          components=(hiveserver2 hivemetastore mysql hadoop)
@@ -1682,11 +2064,160 @@ EOF
    return "${status}"
 }
 
+# Overlays that use hive-credentials (namespace name = overlay name).
+function passwdOverlayName(){
+   case "${1:-}" in
+      mini|llap|secure|standalone) echo "${1}" ;;
+      *) return 1 ;;
+   esac
+}
+# Secret data key for a passwd alias (empty if unknown).
+function passwdSecretKeyForAlias(){
+   case "${1:-}" in
+      mysql-root) echo "mysql-root-password" ;;
+      hive-mysql) echo "hive-metastore-password" ;;
+      hue-mysql) echo "hue-mysql-password" ;;
+      hue-secret-key) echo "hue-secret-key" ;;
+      ranger-admin) echo "ranger-admin-password" ;;
+      ranger-db) echo "ranger-db-password" ;;
+      krb5-master) echo "krb5-master-password" ;;
+      krb5-kadmin) echo "krb5-kadmin-password" ;;
+      root) echo "root-password" ;;
+      hive) echo "hive-password" ;;
+      hadoop) echo "hadoop-password" ;;
+      beeline) echo "beeline-password" ;;
+      admin) echo "admin-password" ;;
+      *) return 1 ;;
+   esac
+}
+# passwd aliases applicable to an overlay profile (may not exist in Secret until ensure* runs).
+function passwdAliasesForOverlay(){
+   local overlay="$1"
+   case "${overlay}" in
+      secure)
+         echo "mysql-root hive-mysql hue-mysql hue-secret-key ranger-admin ranger-db krb5-master krb5-kadmin root hive hadoop beeline admin"
+         ;;
+      llap|mini)
+         echo "mysql-root hive-mysql hue-mysql hue-secret-key root hive hadoop beeline admin"
+         ;;
+      standalone)
+         echo "root hive hadoop beeline admin"
+         ;;
+      *)
+         return 1
+         ;;
+   esac
+}
+function listPasswd(){
+   local overlay="${1:-}"
+   local alias=""
+   local key=""
+   local desc=""
+   local present=""
+
+   if [ -z "${overlay}" ]; then
+      echo "Password aliases (hive-credentials Secret; namespace = overlay name):"
+      echo ""
+      printf "%-16s %-28s %s\n" "ALIAS" "SECRET_KEY" "DESCRIPTION"
+      printf "%-16s %-28s %s\n" "-----" "----------" "-----------"
+      while read -r alias key desc; do
+         [ -n "${alias}" ] || continue
+         printf "%-16s %-28s %s\n" "${alias}" "${key}" "${desc}"
+      done <<'EOF'
+mysql-root mysql-root-password MySQL root
+hive-mysql hive-metastore-password MySQL hive metastore user
+hue-mysql hue-mysql-password Hue MySQL user
+hue-secret-key hue-secret-key Hue Django secret (not a login password)
+ranger-admin ranger-admin-password Ranger UI user admin
+ranger-db ranger-db-password MySQL rangeradmin (Ranger schema)
+krb5-master krb5-master-password KDC database master (secure)
+krb5-kadmin krb5-kadmin-password kadmin principal (secure)
+root root-password Lab bootstrap root slot
+hive hive-password Lab Hive service / JDBC material
+hadoop hadoop-password Lab Hadoop service material
+beeline beeline-password Beeline JDBC (often same as hive at create)
+admin admin-password Lab admin slot (Hue/Hadoop; not Ranger UI)
+EOF
+      echo ""
+      echo "Profiles:"
+      echo "  secure:     mysql-root hive-mysql hue-mysql hue-secret-key ranger-admin ranger-db krb5-master krb5-kadmin root hive hadoop beeline admin"
+      echo "  llap, mini: mysql-root hive-mysql hue-mysql hue-secret-key root hive hadoop beeline admin"
+      echo "  standalone: root hive hadoop beeline admin"
+      echo ""
+      echo "List keys present in a cluster:  hiveCtl list passwd <overlay>"
+      return 0
+   fi
+
+   passwdOverlayName "${overlay}" >/dev/null || {
+      echo "Unknown overlay '${overlay}' (use mini, llap, secure, or standalone)"
+      return 1
+   }
+   requireNamespace "${overlay}" || return 1
+   if ! kubectl get secret hive-credentials -n "${overlay}" >/dev/null 2>&1; then
+      echo "Secret hive-credentials not found in namespace '${overlay}' (start the overlay first)"
+      return 1
+   fi
+
+   echo "Password aliases in hive-credentials (namespace ${overlay}):"
+   printf "%-16s %-28s %s\n" "ALIAS" "SECRET_KEY" "IN_SECRET"
+   for alias in $(passwdAliasesForOverlay "${overlay}"); do
+      key="$(passwdSecretKeyForAlias "${alias}")" || continue
+      present="$(kubectl get secret hive-credentials -n "${overlay}" -o "jsonpath={.data.${key}}" 2>/dev/null)"
+      if [ -n "${present}" ]; then
+         present="yes"
+      else
+         present="no"
+      fi
+      printf "%-16s %-28s %s\n" "${alias}" "${key}" "${present}"
+   done
+}
+function getPasswd(){
+   local overlay=""
+   local alias=""
+   local key=""
+   local value=""
+
+   if passwdOverlayName "${2:-}" >/dev/null 2>&1; then
+      overlay="${2}"
+      alias="${3:-}"
+   else
+      overlay="${HIVECTL_PASSWD_OVERLAY:-secure}"
+      alias="${2:-}"
+   fi
+
+   if [ -z "${alias}" ]; then
+      echo "Usage: hiveCtl get passwd [<overlay>] <alias>   (hiveCtl list passwd for aliases)"
+      return 1
+   fi
+   passwdOverlayName "${overlay}" >/dev/null || {
+      echo "Unknown overlay '${overlay}'"
+      return 1
+   }
+   key="$(passwdSecretKeyForAlias "${alias}")" || {
+      echo "Unknown password alias '${alias}' (try: hiveCtl list passwd)"
+      return 1
+   }
+   requireNamespace "${overlay}" || return 1
+   if ! kubectl get secret hive-credentials -n "${overlay}" >/dev/null 2>&1; then
+      echo "Secret hive-credentials not found in namespace '${overlay}'"
+      return 1
+   fi
+   value="$(kubectl get secret hive-credentials -n "${overlay}" -o "jsonpath={.data.${key}}" 2>/dev/null | base64 -d 2>/dev/null)"
+   if [ -z "${value}" ]; then
+      echo "Key '${key}' (${alias}) is not set in hive-credentials (namespace ${overlay})"
+      return 1
+   fi
+   printf '%s\n' "${value}"
+}
+
 # Dispatch CLI actions to the appropriate helper.
 main(){
    case "${1:-}" in
         __hue-portforward-monitor)
           huePortForwardMonitorLoop
+          ;;
+        __ranger-portforward-monitor)
+          rangerPortForwardMonitorLoop
           ;;
         available)
           overlays
@@ -1748,6 +2279,18 @@ main(){
         cleanup)
           [[ -z "${2:-}" ]] && help && exit 1
           cleanupStack "$2"
+          ;;
+        list)
+          case "${2:-}" in
+             passwd) listPasswd "${3:-}" ;;
+             *) help && exit 1 ;;
+          esac
+          ;;
+        get)
+          case "${2:-}" in
+             passwd) getPasswd "${3:-}" "${4:-}" ;;
+             *) help && exit 1 ;;
+          esac
           ;;
         *)
           help
