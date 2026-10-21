@@ -824,14 +824,29 @@ function huePodRunningAndReady(){
 function hueLocalUrlReachable(){
    local port="$1"
    local code=""
+   local attempt=0
 
    [ -n "${port}" ] || return 1
    command -v curl >/dev/null 2>&1 || return 1
-   code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/" --connect-timeout 2 2>/dev/null || echo 000)"
-   case "${code}" in
-      200|301|302|303|401|403|404) return 0 ;;
-      *) return 1 ;;
-   esac
+   while [ "${attempt}" -lt 3 ]; do
+      code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/hue/accounts/login" --connect-timeout 3 --max-time 8 2>/dev/null || echo 000)"
+      case "${code}" in
+         200|301|302|303|401|403|404) return 0 ;;
+      esac
+      attempt=$((attempt + 1))
+      sleep 1
+   done
+   return 1
+}
+function huePortForwardProcessAlive(){
+   local namespace="$1"
+   local pidfile=""
+   local pid=""
+
+   pidfile="$(huePortForwardPidFile "${namespace}")"
+   [ -f "${pidfile}" ] || return 1
+   pid="$(cat "${pidfile}")"
+   [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
 }
 function stopHuePortForwardMonitor(){
    local namespace="${1:-llap}"
@@ -858,15 +873,13 @@ function startHuePortForwardProcess(){
    pidfile="$(huePortForwardPidFile "${namespace}")"
    mkdir -p "$(hiveCtlStateDir)"
 
-   if [ -f "${pidfile}" ]; then
-      pid="$(cat "${pidfile}")"
-      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-         if hueLocalUrlReachable "${port}"; then
-            return 0
-         fi
-         kill "${pid}" 2>/dev/null || true
-         wait "${pid}" 2>/dev/null || true
+   if huePortForwardProcessAlive "${namespace}"; then
+      if hueLocalUrlReachable "${port}"; then
+         return 0
       fi
+      pid="$(cat "${pidfile}")"
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
       rm -f "${pidfile}"
    fi
 
@@ -902,8 +915,14 @@ function huePortForwardMonitorLoop(){
          continue
       fi
       port="$(hueLocalPort)"
-      if hueLocalUrlReachable "${port}"; then
+      if huePortForwardProcessAlive "${namespace}" && hueLocalUrlReachable "${port}"; then
          continue
+      fi
+      if huePortForwardProcessAlive "${namespace}" && ! hueLocalUrlReachable "${port}"; then
+         sleep 5
+         if hueLocalUrlReachable "${port}"; then
+            continue
+         fi
       fi
       echo "[hiveCtl] Hue http://127.0.0.1:${port}/ unreachable while hue-0 is Ready; restarting port-forward" >&2
       if startHuePortForwardProcess "${namespace}"; then
@@ -986,24 +1005,16 @@ function ensureHuePortForward(){
    pidfile="$(huePortForwardPidFile "${namespace}")"
    mkdir -p "$(hiveCtlStateDir)"
 
-   if hueLocalUrlReachable "${port}"; then
-      if [ -f "${pidfile}" ]; then
-         pid="$(cat "${pidfile}")"
-         if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-            echo "Hue UI (${namespace}): http://localhost:${port}/ (port-forward pid ${pid})"
-         else
-            echo "Hue UI (${namespace}): http://localhost:${port}/ (already reachable; not starting port-forward)"
-         fi
-      else
-         echo "Hue UI (${namespace}): http://localhost:${port}/ (already reachable; not starting port-forward)"
-      fi
+   if huePortForwardProcessAlive "${namespace}" && hueLocalUrlReachable "${port}"; then
+      pid="$(cat "${pidfile}")"
+      echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (port-forward pid ${pid})"
       startHuePortForwardMonitor "${namespace}" || true
       return 0
    fi
 
    if startHuePortForwardProcess "${namespace}"; then
       pid="$(cat "${pidfile}")"
-      echo "Hue UI (${namespace}): http://localhost:${port}/ (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop ${namespace} hue')"
+      echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop ${namespace} hue')"
       startHuePortForwardMonitor "${namespace}" || true
       return 0
    fi
