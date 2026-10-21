@@ -93,7 +93,7 @@ After restore with Phase 2 HS2, rebuild/load the custom image if Kind pruned it 
 
 **Localhost UIs:** **`restore`** and **`start secure`** call **`ensureProfileUiPortForwards`** so **Hue** (`http://localhost:8888/`) and **Ranger** (`http://localhost:6080/login.jsp`) get **`kubectl port-forward`** plus the background monitor (same as starting **`hue`** / **`ranger`** alone). Disable with **`HIVECTL_HUE_PORT_FORWARD=0`** / **`HIVECTL_RANGER_PORT_FORWARD=0`**.
 
-If the backup has no **`secure_hive`** service yet (empty **`x_service`** in **`mysql-ranger.sql`**), create that Hive service in the Ranger UI once, then run **`./scripts/secure-ranger-admin-default-and-owner.sh secure`** before HS2 authorization smoke tests.
+If the backup has no **`secure_hive`** rows in **`mysql-ranger.sql`**, start HS2 with **`HIVECTL_SECURE_RANGER_HS2=1`** so bootstrap runs automatically, or run **`./scripts/secure-ranger-bootstrap-hive.sh secure`** once Ranger is Ready.
 
 ## Architecture (target)
 
@@ -134,20 +134,14 @@ docker build -t hive-on-k8s/hive-ranger:2.4.0-nightly .
 kind load docker-image hive-on-k8s/hive-ranger:2.4.0-nightly   # if using Kind
 
 ./hiveCtl.sh start secure ranger
-# Ranger UI: create Hive service named secure_hive (matches ranger-hive-security.xml)
-
-HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh stop secure hiveserver2
 HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2
 ```
 
+With **`HIVECTL_SECURE_RANGER_HS2=1`**, **`hiveCtl`** runs **`scripts/secure-ranger-bootstrap-hive.sh`** after HS2 is Ready: it creates **`secure_hive`** (REST **`forceSave=true`**, Kerberos JDBC URL) and **`secure-ranger-admin-default-and-owner.sh`**. Disable with **`HIVECTL_SECURE_RANGER_BOOTSTRAP_HIVE=0`**.
+
 Plugin REST URL: **`http://ranger.secure.svc.cluster.local:6080`**. Service name **`secure_hive`**.
 
-6. Smoke: deny/allow via Beeline with Kerberos. Lab **`admin`** (`admin/admin@SECURE.LAB`) should have **all** privileges on **`default`** and on databases/tables/UDFs **they own** (`{OWNER}` rows), not on every database:
-
-```bash
-./scripts/secure-ranger-admin-default-and-owner.sh secure
-# Wait ~30s (policy poll) or restart HS2, then re-run the query as admin.
-```
+6. Smoke: deny/allow via Beeline with Kerberos. Lab **`admin`** (`admin/admin@SECURE.LAB`) should have **all** privileges on **`default`** and on databases/tables/UDFs **they own** (`{OWNER}` rows), not on every database. Wait ~30s for HS2 policy poll or restart HS2 after bootstrap.
 
 **LLAP:** Enforcement stays on the **HS2** session path; no separate LLAP daemon plugin in most deployments.
 

@@ -16,6 +16,7 @@
 # Variables
 #
 set -o pipefail
+HIVECTL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # Helpers
 #
@@ -54,6 +55,7 @@ function help(){
    echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
    echo "Ranger (secure, optional): HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure   or: ./hiveCtl.sh start secure ranger"
    echo "Ranger Hive plugin (secure HS2 Phase 2): build docker/hive-ranger, then HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2"
+   echo "  With HS2 plugin, hiveCtl creates secure_hive + lab admin policies (HIVECTL_SECURE_RANGER_BOOTSTRAP_HIVE=auto; 0 to skip)"
    echo "  Image: HIVE_RANGER_IMAGE=hive-on-k8s/hive-ranger:2.4.0-nightly (default)"
    echo "  Kind: hiveCtl runs 'kind load docker-image' for that tag when present locally (HIVECTL_KIND_LOAD=0 to skip)"
    echo "  Kind cluster name: HIVECTL_KIND_CLUSTER_NAME or KIND_CLUSTER (else inferred from node name, e.g. desktop)"
@@ -720,6 +722,9 @@ function startOverlay(){
    if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
       ensureRangerPortForward "${namespace}" || true
    fi
+   if [ "${namespace}" = "secure" ] && [ "${service}" = "hiveserver2" ]; then
+      ensureSecureRangerHiveBootstrap "${namespace}" || true
+   fi
    if [ "${service}" = "llapdaemon" ]; then
       case "${namespace}" in llap|secure) ensureLlapDaemonPortForward "${namespace}" || true ;; esac
    fi
@@ -1183,6 +1188,40 @@ function stopRangerPortForward(){
 function rangerAdminPasswordHint(){
    local namespace="${1:-secure}"
    echo "Ranger login user: admin   password: kubectl get secret hive-credentials -n ${namespace} -o jsonpath='{.data.ranger-admin-password}' | base64 -d; echo"
+}
+# True when automatic secure_hive + admin policy bootstrap should be skipped.
+function secureRangerHiveBootstrapDisabled(){
+   case "${HIVECTL_SECURE_RANGER_BOOTSTRAP_HIVE:-auto}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      auto)
+         [ "${HIVECTL_SECURE_RANGER_HS2:-0}" = "1" ] || return 0
+         return 1
+         ;;
+      *) return 1 ;;
+   esac
+}
+# Create secure_hive in Ranger and apply scripts/secure-ranger-admin-default-and-owner.sh (idempotent).
+function ensureSecureRangerHiveBootstrap(){
+   local namespace="${1:-secure}"
+   local bootstrap_script="${HIVECTL_ROOT}/scripts/secure-ranger-bootstrap-hive.sh"
+
+   [ "${namespace}" = "secure" ] || return 0
+   if secureRangerHiveBootstrapDisabled; then
+      return 0
+   fi
+   overlayActive "secure_ranger" || return 0
+   rangerPodRunningAndReady "${namespace}" || return 0
+   if [ ! -x "${bootstrap_script}" ]; then
+      echo "Warning: missing ${bootstrap_script}; skip Ranger Hive bootstrap"
+      return 0
+   fi
+   echo "Ranger Hive bootstrap: secure_hive service + lab admin policies ..."
+   if ! "${bootstrap_script}" "${namespace}"; then
+      echo "Warning: Ranger Hive bootstrap failed (HS2 auth may deny until secure_hive exists in Admin)"
+      return 1
+   fi
+   echo "Ranger Hive bootstrap done (HS2 plugin poll ~30s; restart HS2 if policies seem stale)"
+   return 0
 }
 function ensureRangerPortForward(){
    local namespace="${1:-secure}"

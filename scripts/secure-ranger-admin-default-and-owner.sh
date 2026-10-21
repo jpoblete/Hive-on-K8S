@@ -6,7 +6,7 @@
 set -euo pipefail
 NS="${1:-secure}"
 kubectl exec -n "${NS}" ranger-0 -c ranger -- python3 -c '
-import json, urllib.request, base64, os
+import json, urllib.request, base64, os, sys
 
 props = {}
 for path in os.popen("ls /opt/ranger/ranger-*/install.properties 2>/dev/null").read().split():
@@ -34,8 +34,12 @@ def req(method, path, body=None):
     r = urllib.request.Request(base + path, data=data, method=method)
     r.add_header("Authorization", "Basic " + auth)
     r.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(r, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(r, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        err = e.read().decode()
+        raise RuntimeError("%s %s failed (%s): %s" % (method, path, e.code, err)) from e
 
 
 def resource_is_global_star(resources):
@@ -94,7 +98,10 @@ for p in policies:
             owner_rows += 1
 
     if changed:
-        req("PUT", "/policy/" + str(p["id"]), p)
+        try:
+            req("PUT", "/policy/" + str(p["id"]), p)
+        except RuntimeError as err:
+            print("policy_update_skipped:", p.get("name"), err, file=sys.stderr)
 
 print("removed_admin_from_global_policy_items:", removed)
 print("default_db_admin_policy_updated:", default_updated)
