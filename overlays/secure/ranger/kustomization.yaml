@@ -11,6 +11,7 @@ patches:
   - path: statefulset-init.yaml
   - path: statefulset-hadoop-conf.yaml
   - path: statefulset-startup.yaml
+  - path: statefulset-log-volume.yaml
   - patch: |-
       - op: replace
         path: /metadata/namespace

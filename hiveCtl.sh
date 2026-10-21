@@ -1812,8 +1812,6 @@ function cleanupStandaloneStack(){
    local namespace="$1"
    local answer=""
    local confirm=""
-   local pv_names=""
-   local pv=""
    local status=0
 
    requireNamespace "${namespace}" || return 1
@@ -1821,10 +1819,13 @@ function cleanupStandaloneStack(){
    cat <<EOF
 WARNING: cleanup will delete standalone PVCs for namespace '${namespace}'.
 
-This removes Kubernetes' bindings for:
+Typical PVCs:
   - pvc-derby
   - pvc-warehouse
   - pvc-logs
+
+Cleanup removes every PVC in the namespace, every PV bound to it, and
+/var/local-path-provisioner/pvc-*_${namespace}_* on Kind nodes (same as secure).
 
 If these PVCs/PVs are cleared, standalone Derby metastore, warehouse, and logs can be lost.
 EOF
@@ -1850,24 +1851,9 @@ EOF
       return 1
    fi
 
-   pv_names="$(
-      kubectl get pv --no-headers -o custom-columns=NAME:.metadata.name,CLAIM:.spec.claimRef.name,NAMESPACE:.spec.claimRef.namespace \
-      | awk -v namespace="${namespace}" '($2 == "pvc-derby" || $2 == "pvc-warehouse" || $2 == "pvc-logs") && $3 == namespace {print $1}'
-   )" || return 1
-
    stopStack "${namespace}" || return 1
 
-   echo "Deleting standalone PVCs ..."
-   kubectl delete pvc pvc-derby pvc-warehouse pvc-logs -n "${namespace}" --ignore-not-found || status=1
-
-   if [ -n "${pv_names}" ]; then
-      echo "Deleting matching PV objects ..."
-      for pv in ${pv_names}; do
-         kubectl delete pv "${pv}" --ignore-not-found || status=1
-      done
-   fi
-
-   waitForDeleted 180 pvc/pvc-derby pvc/pvc-warehouse pvc/pvc-logs -n "${namespace}" || status=1
+   deleteNamespaceStorageAndLocalPath "${namespace}" || status=1
 
    echo "Deleting namespace '${namespace}' ..."
    kubectl delete namespace "${namespace}" --ignore-not-found || status=1
@@ -1978,16 +1964,115 @@ function hdfsRestoreFromArchive(){
       '
    fi
 }
-# PVC names removed by cleanupStack for a profile.
-function stackCleanupPvcs(){
+# Delete orphaned local-path-provisioner dirs on Kind nodes (Retain PVs leave data on disk).
+function cleanupLocalPathProvisionerDirs(){
+   local namespace="$1"
+   local node=""
+   local line=""
+   local path=""
+   local size=""
+
+   [ -n "${namespace}" ] || return 0
+   if ! command -v docker >/dev/null 2>&1; then
+      echo "docker not available; skipping stale local-path-provisioner cleanup on Kind nodes"
+      return 0
+   fi
+   if ! kubectl get nodes >/dev/null 2>&1; then
+      echo "kubectl cannot list nodes; skipping stale local-path-provisioner cleanup"
+      return 0
+   fi
+
+   echo "Removing stale local-path-provisioner data for namespace '${namespace}' on Kind nodes ..."
+   while IFS= read -r node; do
+      [ -n "${node}" ] || continue
+      docker inspect "${node}" >/dev/null 2>&1 || continue
+      while IFS= read -r line; do
+         [ -n "${line}" ] || continue
+         path="${line#*|}"
+         size="${line%%|*}"
+         echo "  ${node}: removed ${path} (${size})"
+      done < <(
+         docker exec "${node}" bash -lc "
+            shopt -s nullglob
+            for d in /var/local-path-provisioner/pvc-*_${namespace}_*; do
+               [ -d \"\${d}\" ] || continue
+               sz=\$(du -sh \"\${d}\" 2>/dev/null | awk '{print \$1}')
+               echo \"\${sz}|\${d}\"
+               rm -rf \"\${d}\"
+            done
+         " 2>/dev/null || true
+      )
+   done < <(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null)
+
+   return 0
+}
+# Typical PVC names per profile (cleanup also removes any other PVCs still in the namespace).
+function stackCleanupPvcsExpected(){
    case "${1:-}" in
       secure)
          echo "mysql-mysql-0 pvc-hdfs-nn datanode-data-hadoop-datanode-0 datanode-data-hadoop-datanode-1 datanode-data-hadoop-datanode-2 krb5kdc-data-krb5kdc-0"
+         ;;
+      mini|llap)
+         echo "mysql-mysql-0 pvc-hdfs"
+         ;;
+      standalone)
+         echo "pvc-derby pvc-warehouse pvc-logs"
          ;;
       *)
          echo "mysql-mysql-0 pvc-hdfs"
          ;;
    esac
+}
+function pvcNamesInNamespace(){
+   local namespace="$1"
+
+   kubectl get pvc -n "${namespace}" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{end}' 2>/dev/null
+}
+function pvNamesForNamespace(){
+   local namespace="$1"
+
+   kubectl get pv -o custom-columns=NAME:.metadata.name,NS:.spec.claimRef.namespace --no-headers 2>/dev/null \
+      | awk -v ns="${namespace}" '$2 == ns { print $1 }'
+}
+# Delete every PVC in the namespace, every PV bound to it, and local-path dirs on Kind nodes.
+function deleteNamespaceStorageAndLocalPath(){
+   local namespace="$1"
+   local status=0
+   local pvc_list=""
+   local pv_names=""
+   local pv=""
+   local pvc=""
+   local wait_args=()
+
+   pvc_list="$(pvcNamesInNamespace "${namespace}")"
+   pv_names="$(pvNamesForNamespace "${namespace}")"
+
+   if [ -n "${pvc_list// /}" ]; then
+      echo "Deleting PVCs in namespace '${namespace}' ..."
+      # shellcheck disable=SC2086
+      kubectl delete pvc ${pvc_list} -n "${namespace}" --ignore-not-found || status=1
+   else
+      echo "No PVCs remain in namespace '${namespace}'."
+   fi
+
+   if [ -n "${pv_names}" ]; then
+      echo "Deleting PV objects bound to namespace '${namespace}' ..."
+      while IFS= read -r pv; do
+         [ -n "${pv}" ] || continue
+         kubectl delete pv "${pv}" --ignore-not-found || status=1
+      done <<< "${pv_names}"
+   fi
+
+   wait_args=()
+   for pvc in ${pvc_list}; do
+      wait_args+=( "pvc/${pvc}" )
+   done
+   if [ "${#wait_args[@]}" -gt 0 ]; then
+      waitForDeleted 180 "${wait_args[@]}" -n "${namespace}" || status=1
+   fi
+
+   cleanupLocalPathProvisionerDirs "${namespace}" || true
+   return "${status}"
 }
 # Return 0 when MySQL in the namespace contains the given database.
 function mysqlDatabaseExists(){
@@ -2251,9 +2336,9 @@ function cleanupStack(){
    local namespace="$1"
    local answer=""
    local confirm=""
-   local pv_names=""
-   local pv=""
    local status=0
+   local expected_pvcs=""
+   local actual_pvcs=""
 
    if [ "${namespace}" = "standalone" ]; then
       cleanupStandaloneStack "${namespace}"
@@ -2262,14 +2347,20 @@ function cleanupStack(){
 
    requireNamespace "${namespace}" || return 1
 
-   local pvc_list
-   pvc_list="$(stackCleanupPvcs "${namespace}")"
+   expected_pvcs="$(stackCleanupPvcsExpected "${namespace}")"
+   actual_pvcs="$(pvcNamesInNamespace "${namespace}")"
 
    cat <<EOF
 WARNING: cleanup will delete PVCs for namespace '${namespace}'.
 
-This removes Kubernetes' bindings for:
-$(for pvc in ${pvc_list}; do echo "  - ${pvc}"; done)
+Typical PVCs for this profile:
+$(for pvc in ${expected_pvcs}; do echo "  - ${pvc}"; done)
+
+Cleanup removes every PVC still in the namespace and every PV bound to it
+(same as secure), then stale local-path data on Kind nodes.
+$(if [ -n "${actual_pvcs// /}" ] && [ "${actual_pvcs}" != "${expected_pvcs}" ]; then
+     echo "PVCs currently present: ${actual_pvcs}"
+   fi)
 
 If these PVCs/PVs are cleared, Hive metastore and HDFS data can be lost.
 EOF
@@ -2295,32 +2386,9 @@ EOF
       return 1
    fi
 
-   pv_names="$(
-      kubectl get pv --no-headers -o custom-columns=NAME:.metadata.name,CLAIM:.spec.claimRef.name,NAMESPACE:.spec.claimRef.namespace \
-      | awk -v namespace="${namespace}" -v pvcs="${pvc_list}" '
-         BEGIN { n = split(pvcs, a, " "); for (i = 1; i <= n; i++) wanted[a[i]] = 1 }
-         wanted[$2] && $3 == namespace { print $1 }
-      '
-   )" || return 1
-
    stopStack "${namespace}" || return 1
 
-   echo "Deleting PVCs ..."
-   # shellcheck disable=SC2086
-   kubectl delete pvc ${pvc_list} -n "${namespace}" --ignore-not-found || status=1
-
-   if [ -n "${pv_names}" ]; then
-      echo "Deleting matching PV objects ..."
-      for pv in ${pv_names}; do
-         kubectl delete pv "${pv}" --ignore-not-found || status=1
-      done
-   fi
-
-   local wait_args=()
-   for pvc in ${pvc_list}; do
-      wait_args+=( "pvc/${pvc}" )
-   done
-   waitForDeleted 180 "${wait_args[@]}" -n "${namespace}" || status=1
+   deleteNamespaceStorageAndLocalPath "${namespace}" || status=1
 
    echo "Deleting namespace '${namespace}' ..."
    kubectl delete namespace "${namespace}" --ignore-not-found || status=1

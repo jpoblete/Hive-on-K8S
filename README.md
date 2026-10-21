@@ -293,7 +293,7 @@ Restore:
 
 Restore also works after cleanup or on a new cluster: it creates the namespace with the backed-up credentials, starts the storage, loads the backup, and then starts the rest of the stack. If MySQL already has a volume, the current credentials are kept, because MySQL created its users with them and the metastore dump doesn't include users.
 
-Destructive cleanup requires confirmation and offers to create a backup first:
+Destructive cleanup requires confirmation and offers to create a backup first. For every profile (`mini`, `llap`, `secure`, `standalone`), cleanup deletes **all** PVCs in the namespace, **all** PVs bound to that namespace, and matching **`local-path-provisioner`** directories on Kind nodes (not only a fixed PVC name list).
 
 ```bash
 ./hiveCtl.sh cleanup standalone

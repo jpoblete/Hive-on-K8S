@@ -19,6 +19,18 @@ spec:
             - |
               set -euo pipefail
               RANGER_HOME=/opt/ranger
+              RANGER_LOG_DIR="${RANGER_HOME}/ranger-2.4.0-admin/ews/logs"
+              RANGER_LOG_MAX_BYTES=$((512 * 1024 * 1024))
+              trim_ranger_admin_logs() {
+                local f=""
+                mkdir -p "${RANGER_LOG_DIR}"
+                find "${RANGER_LOG_DIR}" -maxdepth 1 -type f -name 'ranger-admin-*.log' -size +"${RANGER_LOG_MAX_BYTES}c" -print0 2>/dev/null \
+                  | while IFS= read -r -d '' f; do
+                      echo "[ranger] Truncating oversized admin log: ${f}"
+                      truncate -s 0 "${f}" || rm -f "${f}"
+                    done
+              }
+              trim_ranger_admin_logs
               if [ ! -f "${RANGER_HOME}/.setupDone" ]; then
                 cd "${RANGER_HOME}/admin"
                 if ! ./setup.sh; then
@@ -41,6 +53,12 @@ spec:
                 echo "Ranger Admin JVM did not start; see ews/logs/catalina.out"
                 exit 1
               fi
+              (
+                while kill -0 "${pid}" 2>/dev/null; do
+                  sleep 3600
+                  trim_ranger_admin_logs
+                done
+              ) &
               tail --pid="${pid}" -f /dev/null
           startupProbe:
             httpGet:
