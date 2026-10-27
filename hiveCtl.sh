@@ -17,7 +17,10 @@
 #
 set -o pipefail
 HIVECTL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HIVECTL_BIN_DIR="${HIVECTL_BIN_DIR:-${HIVECTL_ROOT}/.bin}"
+PATH="${HIVECTL_BIN_DIR}:${PATH}"
 HIVECTL_LOCAL_PATH_STORAGE_URL="${HIVECTL_LOCAL_PATH_STORAGE_URL:-https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml}"
+HIVECTL_KUSTOMIZE_INSTALL_URL="${HIVECTL_KUSTOMIZE_INSTALL_URL:-https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh}"
 HIVE_STORAGE_CLASS_NAME="${HIVE_STORAGE_CLASS_NAME:-hive-on-k8s-local-path}"
 #
 # Helpers
@@ -69,6 +72,8 @@ function help(){
    echo "Storage: before start/restore, hiveCtl requires StorageClass ${HIVE_STORAGE_CLASS_NAME} (rancher.io/local-path, Retain)"
    echo "  Installs ${HIVECTL_LOCAL_PATH_STORAGE_URL} when missing (HIVECTL_STORAGE_CHECK=0 to skip)"
    echo "  Override class name: HIVE_STORAGE_CLASS_NAME=<name>"
+   echo "Host tools: kubectl (required); kustomize auto-installed to ${HIVECTL_BIN_DIR} when missing (HIVECTL_KUSTOMIZE_INSTALL=0 to disable)"
+   echo "  Pin version: HIVECTL_KUSTOMIZE_VERSION=5.4.3   Install URL: HIVECTL_KUSTOMIZE_INSTALL_URL"
 }
 # Print the names of the objects kubectl get selects, nothing when there are none.
 # A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.
@@ -1816,6 +1821,57 @@ function reportKindNodeDisk(){
    [ -n "${use}" ] || return 1
    echo "${node} /var ${use}% used"
 }
+# Download the standalone kustomize CLI into HIVECTL_BIN_DIR when it is not on PATH.
+function installLocalKustomize(){
+   local bin="${HIVECTL_BIN_DIR}/kustomize"
+   local version="${HIVECTL_KUSTOMIZE_VERSION:-}"
+   local install_args=()
+
+   mkdir -p "${HIVECTL_BIN_DIR}" || return 1
+   if [ -x "${bin}" ]; then
+      return 0
+   fi
+   case "${HIVECTL_KUSTOMIZE_INSTALL:-1}" in
+      0|false|no|off|disable|disabled)
+         echo "hiveCtl: kustomize is not on PATH and HIVECTL_KUSTOMIZE_INSTALL=0" >&2
+         return 1
+         ;;
+   esac
+   if ! command -v curl >/dev/null 2>&1; then
+      echo "hiveCtl: curl is required to download kustomize into ${HIVECTL_BIN_DIR}" >&2
+      return 1
+   fi
+   echo "hiveCtl: kustomize not found — installing into ${HIVECTL_BIN_DIR} ..."
+   if [ -n "${version}" ]; then
+      install_args=( "${version}" "${HIVECTL_BIN_DIR}" )
+   else
+      install_args=( "${HIVECTL_BIN_DIR}" )
+   fi
+   curl -sL "${HIVECTL_KUSTOMIZE_INSTALL_URL}" | bash -s -- "${install_args[@]}" || return 1
+   chmod +x "${bin}" 2>/dev/null || true
+   if [ ! -x "${bin}" ]; then
+      echo "hiveCtl: kustomize install did not create executable ${bin}" >&2
+      return 1
+   fi
+   echo "hiveCtl: kustomize ready ($("${bin}" version -s 2>/dev/null || "${bin}" version 2>/dev/null | head -1))"
+}
+# Require kubectl and the standalone kustomize CLI before building overlays.
+function requireHostDeployTools(){
+   if ! command -v kubectl >/dev/null 2>&1; then
+      echo "hiveCtl: kubectl is not on PATH (required)" >&2
+      return 1
+   fi
+   if command -v kustomize >/dev/null 2>&1; then
+      return 0
+   fi
+   installLocalKustomize || return 1
+   command -v kustomize >/dev/null 2>&1
+}
+function requireHostDeployToolsOnce(){
+   [ "${HIVECTL_HOST_TOOLS_CHECKED:-0}" = "1" ] && return 0
+   HIVECTL_HOST_TOOLS_CHECKED=1
+   requireHostDeployTools
+}
 # Return 0 when the Hive StorageClass uses rancher.io/local-path with reclaimPolicy Retain.
 function hiveLocalPathStorageClassReady(){
    local provisioner=""
@@ -1931,6 +1987,7 @@ function ensureClusterDiskSpaceOnce(){
    ensureClusterDiskSpace
 }
 function ensureDeployPrerequisitesOnce(){
+   requireHostDeployToolsOnce || return 1
    ensureClusterDiskSpaceOnce
    ensureHiveLocalPathStorageClassOnce || return 1
 }

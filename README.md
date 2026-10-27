@@ -54,15 +54,24 @@ secure:       apache/hive:nightly (same LLAP stack as llap: Metastore x2, HiveSe
 
 ## Prerequisites
 
-Install these tools on the machine where you run `hiveCtl.sh`:
+Install these tools on the machine where you run `hiveCtl.sh` (the same host you use for `kubectl`, not inside cluster nodes):
 
-```text
-kubectl
-kustomize
-shellcheck   # optional, for validation
+| Tool | Required | Notes |
+|------|----------|--------|
+| **`kubectl`** | Yes | Cluster admin or sufficient RBAC to create namespaces, StatefulSets, PVCs, Secrets, etc. |
+| **`kustomize`** | Yes (auto) | `hiveCtl.sh` runs `kustomize build … \| kubectl apply -f -` for every component (not `kubectl apply -k`). If **`kustomize`** is missing, **`hiveCtl`** downloads it into **`.bin/kustomize`** on first **`start`** / **`restore`** (needs **`curl`**). Disable: **`HIVECTL_KUSTOMIZE_INSTALL=0`**. Pin: **`HIVECTL_KUSTOMIZE_VERSION=5.4.3`**. |
+| **`curl`** | Yes* | Required only when kustomize must be bootstrapped into `.bin/`. |
+| **`shellcheck`** | No | Optional; used by [Validation](#validation). |
+
+Manual **kustomize** install (optional — any copy on `PATH` is used before `.bin/`):
+
+```bash
+curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+sudo install -m 0755 kustomize /usr/local/bin/kustomize
+kustomize version
 ```
 
-You also need a local Kubernetes cluster, for example:
+You also need a Kubernetes cluster reachable from that host, for example:
 
 ```text
 Docker Desktop Kubernetes
