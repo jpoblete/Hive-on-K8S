@@ -17,6 +17,8 @@
 #
 set -o pipefail
 HIVECTL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HIVECTL_LOCAL_PATH_STORAGE_URL="${HIVECTL_LOCAL_PATH_STORAGE_URL:-https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml}"
+HIVE_STORAGE_CLASS_NAME="${HIVE_STORAGE_CLASS_NAME:-hive-on-k8s-local-path}"
 #
 # Helpers
 #
@@ -41,10 +43,10 @@ function help(){
    echo "        hiveCtl get passwd <alias>             (same; overlay defaults to secure, or HIVECTL_PASSWD_OVERLAY)"
    echo "        hiveCtl status   (active components and ready/total pod counts)"
    echo ""
-   echo "Hue (llap|secure): after start, hiveCtl tries http://localhost:8888 automatically"
+   echo "Hue (standalone|mini|llap|secure): port-forward (standalone=8885, mini=8886, llap=8887, secure=8888)"
    echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
    echo "  While hue-0 is Ready, a background monitor restarts port-forward every minute if localhost stops responding"
-   echo "  Disable forward: HIVECTL_HUE_PORT_FORWARD=0   Port: HIVECTL_HUE_LOCAL_PORT=8888"
+   echo "  Disable forward: HIVECTL_HUE_PORT_FORWARD=0   Override port: HIVECTL_HUE_LOCAL_PORT=<port>"
    echo "  Disable monitor: HIVECTL_HUE_PORT_FORWARD_MONITOR=0   Interval: HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL=60"
    echo "Ranger Admin (secure): after 'start secure ranger', hiveCtl tries http://localhost:6080/login.jsp"
    echo "  Same port-forward + monitor pattern as Hue. Disable: HIVECTL_RANGER_PORT_FORWARD=0"
@@ -52,6 +54,9 @@ function help(){
    echo "  Login: admin + password from: kubectl get secret hive-credentials -n secure -o jsonpath='{.data.ranger-admin-password}' | base64 -d; echo"
    echo "LLAP daemon UI: http://localhost:15002 after start llapdaemon (pod llapdaemon-0)"
    echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
+   echo "HiveServer2 (standalone|mini|llap|secure): port-forward thrift/http/webui (base+0/+1/+2):"
+   echo "  standalone 11000-11002 · mini 11100-11102 · llap 11200-11202 · secure 11300-11302"
+   echo "  Disable: HIVECTL_HS2_PORT_FORWARD=0   Override bases: HIVECTL_HS2_LOCAL_PORT_BASE=<port>"
    echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
    echo "Ranger (secure, optional): HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure   or: ./hiveCtl.sh start secure ranger"
    echo "Ranger Hive plugin (secure HS2 Phase 2): build docker/hive-ranger, then HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2"
@@ -61,6 +66,9 @@ function help(){
    echo "  Kind cluster name: HIVECTL_KIND_CLUSTER_NAME or KIND_CLUSTER (else inferred from node name, e.g. desktop)"
    echo "Disk: before start/restore, hiveCtl checks Kind /var on all nodes (mini, llap, secure, standalone)"
    echo "  Prune when use exceeds threshold: HIVECTL_DISK_MAX_USE_PERCENT=90 (HIVECTL_DISK_CHECK=0 to skip)"
+   echo "Storage: before start/restore, hiveCtl requires StorageClass ${HIVE_STORAGE_CLASS_NAME} (rancher.io/local-path, Retain)"
+   echo "  Installs ${HIVECTL_LOCAL_PATH_STORAGE_URL} when missing (HIVECTL_STORAGE_CHECK=0 to skip)"
+   echo "  Override class name: HIVE_STORAGE_CLASS_NAME=<name>"
 }
 # Print the names of the objects kubectl get selects, nothing when there are none.
 # A failed API call isn't read as "none": after three attempts its error is shown and the status is 2.
@@ -298,7 +306,7 @@ function ensureHueSecrets(){
    local hue_secret_key=""
    local existing=""
 
-   case "${namespace}" in llap|secure) ;; *) return 0 ;; esac
+   case "${namespace}" in standalone|mini|llap|secure) ;; *) return 0 ;; esac
    ensureSecrets "${namespace}" || return 1
    existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.hue-mysql-password}' 2>/dev/null)" || return 1
    if [ -n "${existing}" ]; then
@@ -543,8 +551,26 @@ function stopSecureHadoop(){
 }
 function profileHasHue(){
    case "${1:-}" in
-      llap|secure) return 0 ;;
+      standalone|mini|llap|secure) return 0 ;;
       *) return 1 ;;
+   esac
+}
+function hueDefaultLocalPort(){
+   case "${1:-}" in
+      standalone) echo 8885 ;;
+      mini) echo 8886 ;;
+      llap) echo 8887 ;;
+      secure) echo 8888 ;;
+      *) echo 8888 ;;
+   esac
+}
+function hueDefaultNodePort(){
+   case "${1:-}" in
+      standalone) echo 30886 ;;
+      mini) echo 30887 ;;
+      llap) echo 30888 ;;
+      secure) echo 30889 ;;
+      *) echo "" ;;
    esac
 }
 # Wait until every replica of a component StatefulSet or Deployment reports Ready.
@@ -626,7 +652,7 @@ function startOverlay(){
       fi
    fi
 
-   ensureClusterDiskSpaceOnce
+   ensureDeployPrerequisitesOnce || return 1
 
    if [ "${target}" = "secure_hiveserver2" ]; then
       ensureSecureRangerHs2KindImage || return 1
@@ -719,6 +745,9 @@ function startOverlay(){
    if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
       ensureHuePortForward "${namespace}" || true
    fi
+   if hs2OverlayServiceStarted "${namespace}" "${service}"; then
+      ensureHs2PortForward "${namespace}" || true
+   fi
    if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
       ensureRangerPortForward "${namespace}" || true
    fi
@@ -766,6 +795,9 @@ function stopOverlay(){
    if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
       stopHuePortForward "${namespace}"
    fi
+   if hs2OverlayServiceStarted "${namespace}" "${service}"; then
+      stopHs2PortForward "${namespace}"
+   fi
    if [ "${service}" = "llapdaemon" ]; then
       case "${namespace}" in llap|secure) stopLlapDaemonPortForward "${namespace}" ;; esac
    fi
@@ -795,7 +827,36 @@ function huePortForwardMonitorPidFile(){
    echo "$(hiveCtlStateDir)/${namespace}-hue-portforward-monitor.pid"
 }
 function hueLocalPort(){
-   echo "${HIVECTL_HUE_LOCAL_PORT:-8888}"
+   local namespace="${1:-}"
+
+   if [ -n "${HIVECTL_HUE_LOCAL_PORT:-}" ]; then
+      echo "${HIVECTL_HUE_LOCAL_PORT}"
+      return 0
+   fi
+   if [ -n "${namespace}" ]; then
+      hueDefaultLocalPort "${namespace}"
+      return 0
+   fi
+   echo 8888
+}
+function hueLocalPortConflictMessage(){
+   local namespace="$1"
+   local port="$2"
+   local other=""
+   local pidfile=""
+   local other_port=""
+
+   for other in standalone mini llap secure; do
+      [ "${other}" = "${namespace}" ] && continue
+      pidfile="$(huePortForwardPidFile "${other}")"
+      [ -f "${pidfile}" ] || continue
+      other_port="$(hueLocalPort "${other}")"
+      if [ "${other_port}" = "${port}" ]; then
+         echo "Hue port-forward for '${other}' already uses localhost:${port}; set HIVECTL_HUE_LOCAL_PORT for '${namespace}'."
+         return 0
+      fi
+   done
+   return 1
 }
 function huePortForwardDisabled(){
    case "${HIVECTL_HUE_PORT_FORWARD:-auto}" in
@@ -869,9 +930,14 @@ function startHuePortForwardProcess(){
    local pidfile=""
    local pid=""
 
-   port="$(hueLocalPort)"
+   port="$(hueLocalPort "${namespace}")"
    pidfile="$(huePortForwardPidFile "${namespace}")"
    mkdir -p "$(hiveCtlStateDir)"
+
+   if hueLocalPortConflictMessage "${namespace}" "${port}" >/dev/null; then
+      hueLocalPortConflictMessage "${namespace}" "${port}" >&2
+      return 1
+   fi
 
    if huePortForwardProcessAlive "${namespace}"; then
       if hueLocalUrlReachable "${port}"; then
@@ -914,7 +980,7 @@ function huePortForwardMonitorLoop(){
       if ! huePodRunningAndReady "${namespace}"; then
          continue
       fi
-      port="$(hueLocalPort)"
+      port="$(hueLocalPort "${namespace}")"
       if huePortForwardProcessAlive "${namespace}" && hueLocalUrlReachable "${port}"; then
          continue
       fi
@@ -960,7 +1026,7 @@ function startHuePortForwardMonitor(){
    hivectl="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
    nohup env HIVECTL_STATE_DIR="$(hiveCtlStateDir)" \
       HIVECTL_HUE_NAMESPACE="${namespace}" \
-      HIVECTL_HUE_LOCAL_PORT="$(hueLocalPort)" \
+      HIVECTL_HUE_LOCAL_PORT="$(hueLocalPort "${namespace}")" \
       HIVECTL_HUE_PORT_FORWARD="${HIVECTL_HUE_PORT_FORWARD:-auto}" \
       HIVECTL_HUE_PORT_FORWARD_MONITOR="${HIVECTL_HUE_PORT_FORWARD_MONITOR:-1}" \
       HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL="${HIVECTL_HUE_PORT_FORWARD_MONITOR_INTERVAL:-60}" \
@@ -1001,25 +1067,328 @@ function ensureHuePortForward(){
       return 0
    fi
 
-   port="$(hueLocalPort)"
+   port="$(hueLocalPort "${namespace}")"
    pidfile="$(huePortForwardPidFile "${namespace}")"
    mkdir -p "$(hiveCtlStateDir)"
 
+   if hueLocalPortConflictMessage "${namespace}" "${port}" >/dev/null; then
+      hueLocalPortConflictMessage "${namespace}" "${port}" >&2
+      return 1
+   fi
+
    if huePortForwardProcessAlive "${namespace}" && hueLocalUrlReachable "${port}"; then
       pid="$(cat "${pidfile}")"
-      echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (port-forward pid ${pid})"
+      np="$(hueDefaultNodePort "${namespace}")"
+      if [ -n "${np}" ]; then
+         echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (port-forward pid ${pid}; NodePort ${np})"
+      else
+         echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (port-forward pid ${pid})"
+      fi
       startHuePortForwardMonitor "${namespace}" || true
       return 0
    fi
 
    if startHuePortForwardProcess "${namespace}"; then
       pid="$(cat "${pidfile}")"
-      echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop ${namespace} hue')"
+      np="$(hueDefaultNodePort "${namespace}")"
+      if [ -n "${np}" ]; then
+         echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (hiveCtl port-forward pid ${pid}; NodePort ${np}; stops on './hiveCtl.sh stop ${namespace} hue')"
+      else
+         echo "Hue UI (${namespace}): http://127.0.0.1:${port}/hue/accounts/login (hiveCtl port-forward pid ${pid}; stops on './hiveCtl.sh stop ${namespace} hue')"
+      fi
       startHuePortForwardMonitor "${namespace}" || true
       return 0
    fi
    echo "Warning: could not bind localhost:${port} for Hue. Try: kubectl port-forward svc/hue -n ${namespace} ${port}:8888" >&2
    startHuePortForwardMonitor "${namespace}" || true
+   return 1
+}
+function profileHasHs2Service(){
+   case "${1:-}" in
+      standalone|mini|llap|secure) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function hs2LocalPortBase(){
+   local namespace="${1:-}"
+
+   if [ -n "${HIVECTL_HS2_LOCAL_PORT_BASE:-}" ]; then
+      echo "${HIVECTL_HS2_LOCAL_PORT_BASE}"
+      return 0
+   fi
+   case "${namespace}" in
+      standalone) echo 11000 ;;
+      mini) echo 11100 ;;
+      llap) echo 11200 ;;
+      secure) echo 11300 ;;
+      *) echo 11000 ;;
+   esac
+}
+function hs2LocalPort(){
+   local namespace="$1"
+   local which="$2"
+   local base=""
+
+   base="$(hs2LocalPortBase "${namespace}")"
+   case "${which}" in
+      binary|0) echo $((base + 0)) ;;
+      http|1) echo $((base + 1)) ;;
+      webui|2) echo $((base + 2)) ;;
+      *) echo "${base}" ;;
+   esac
+}
+function hs2DefaultNodePort(){
+   local namespace="$1"
+   local which="$2"
+   local base=""
+
+   case "${namespace}" in
+      standalone) base=31000 ;;
+      mini) base=31010 ;;
+      llap) base=31020 ;;
+      secure) base=31030 ;;
+      *) base=31000 ;;
+   esac
+   case "${which}" in
+      binary|0) echo $((base + 0)) ;;
+      http|1) echo $((base + 1)) ;;
+      webui|2) echo $((base + 2)) ;;
+      *) echo "${base}" ;;
+   esac
+}
+function hs2PortForwardPidFile(){
+   local namespace="${1:-mini}"
+   echo "$(hiveCtlStateDir)/${namespace}-hs2-portforward.pid"
+}
+function hs2WebUiProxyPidFile(){
+   local namespace="${1:-mini}"
+   echo "$(hiveCtlStateDir)/${namespace}-hs2-webui-proxy.pid"
+}
+function hs2WebUiUpstreamPidFile(){
+   local namespace="${1:-mini}"
+   echo "$(hiveCtlStateDir)/${namespace}-hs2-webui-upstream-pf.pid"
+}
+# Loopback-only kubectl target for HS2 Web UI (Host header must stay :10002 for Hive HttpServer).
+function hs2WebUiUpstreamPort(){
+   case "${1:-}" in
+      standalone) echo 40000 ;;
+      mini) echo 40100 ;;
+      llap) echo 40200 ;;
+      secure) echo 40300 ;;
+      *) echo 40100 ;;
+   esac
+}
+function hs2WebUiProxyScript(){
+   echo "${HIVECTL_ROOT}/scripts/hs2-webui-proxy.py"
+}
+function hs2PortForwardDisabled(){
+   case "${HIVECTL_HS2_PORT_FORWARD:-auto}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+function hs2PortForwardProcessAlive(){
+   local namespace="$1"
+   local pidfile=""
+   local pid=""
+
+   pidfile="$(hs2PortForwardPidFile "${namespace}")"
+   [ -f "${pidfile}" ] || return 1
+   pid="$(cat "${pidfile}")"
+   [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null
+}
+function hs2LocalPortConflictMessage(){
+   local namespace="$1"
+   local other=""
+   local pidfile=""
+   local p=""
+   local op=""
+   local ports=""
+   local oports=""
+
+   ports="$(hs2LocalPort "${namespace}" binary) $(hs2LocalPort "${namespace}" http) $(hs2LocalPort "${namespace}" webui)"
+   for other in standalone mini llap secure; do
+      [ "${other}" = "${namespace}" ] && continue
+      pidfile="$(hs2PortForwardPidFile "${other}")"
+      [ -f "${pidfile}" ] || continue
+      oports="$(hs2LocalPort "${other}" binary) $(hs2LocalPort "${other}" http) $(hs2LocalPort "${other}" webui)"
+      for p in ${ports}; do
+         for op in ${oports}; do
+            if [ "${p}" = "${op}" ]; then
+               echo "HS2 port-forward for '${other}' already uses localhost:${p}; set HIVECTL_HS2_LOCAL_PORT_BASE for '${namespace}'."
+               return 0
+            fi
+         done
+      done
+   done
+   return 1
+}
+function stopHs2PortForward(){
+   local namespace="${1:-mini}"
+   local pidfile=""
+   local pid=""
+
+   pidfile="$(hs2WebUiProxyPidFile "${namespace}")"
+   if [ -f "${pidfile}" ]; then
+      pid="$(cat "${pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         kill "${pid}" 2>/dev/null || true
+         wait "${pid}" 2>/dev/null || true
+      fi
+      rm -f "${pidfile}"
+   fi
+   pidfile="$(hs2WebUiUpstreamPidFile "${namespace}")"
+   if [ -f "${pidfile}" ]; then
+      pid="$(cat "${pidfile}")"
+      if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+         kill "${pid}" 2>/dev/null || true
+         wait "${pid}" 2>/dev/null || true
+      fi
+      rm -f "${pidfile}"
+   fi
+   pidfile="$(hs2PortForwardPidFile "${namespace}")"
+   [ -f "${pidfile}" ] || return 0
+   pid="$(cat "${pidfile}")"
+   if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+   fi
+   rm -f "${pidfile}"
+}
+function startHs2PortForwardProcess(){
+   local namespace="$1"
+   local pidfile=""
+   local proxy_pidfile=""
+   local pid=""
+   local proxy_pid=""
+   local lb=""
+   local lh=""
+   local lw=""
+   local upstream=""
+   local proxy_script=""
+
+   lb="$(hs2LocalPort "${namespace}" binary)"
+   lh="$(hs2LocalPort "${namespace}" http)"
+   lw="$(hs2LocalPort "${namespace}" webui)"
+   upstream="$(hs2WebUiUpstreamPort "${namespace}")"
+   pidfile="$(hs2PortForwardPidFile "${namespace}")"
+   proxy_pidfile="$(hs2WebUiProxyPidFile "${namespace}")"
+   proxy_script="$(hs2WebUiProxyScript)"
+
+   if hs2LocalPortConflictMessage "${namespace}" >/dev/null; then
+      hs2LocalPortConflictMessage "${namespace}" >&2
+      return 1
+   fi
+
+   if hs2PortForwardProcessAlive "${namespace}"; then
+      stopHs2PortForward "${namespace}"
+   fi
+
+   if [ ! -f "${proxy_script}" ]; then
+      echo "Missing ${proxy_script} (HS2 Web UI proxy)" >&2
+      return 1
+   fi
+
+   nohup kubectl port-forward --address 127.0.0.1 "svc/hiveserver2" -n "${namespace}" \
+      "${lb}:10000" "${lh}:10001" >/dev/null 2>&1 &
+   pid=$!
+   echo "${pid}" > "${pidfile}"
+   sleep 1
+   if ! kill -0 "${pid}" 2>/dev/null; then
+      rm -f "${pidfile}"
+      return 1
+   fi
+   nohup kubectl port-forward --address 127.0.0.1 "svc/hiveserver2" -n "${namespace}" \
+      "${upstream}:10002" >/dev/null 2>&1 &
+   pid=$!
+   echo "${pid}" > "$(hs2WebUiUpstreamPidFile "${namespace}")"
+   sleep 1
+   if ! kill -0 "${pid}" 2>/dev/null; then
+      stopHs2PortForward "${namespace}"
+      return 1
+   fi
+
+   nohup python3 "${proxy_script}" --listen-port "${lw}" --upstream-port "${upstream}" >/dev/null 2>&1 &
+   proxy_pid=$!
+   echo "${proxy_pid}" > "${proxy_pidfile}"
+   sleep 1
+   kill -0 "${proxy_pid}" 2>/dev/null
+}
+function ensureHs2PortForward(){
+   local namespace="${1:-mini}"
+   local pidfile=""
+   local pid=""
+   local lb=""
+   local lh=""
+   local lw=""
+   local nb=""
+   local nh=""
+   local nw=""
+
+   if hs2PortForwardDisabled; then
+      stopHs2PortForward "${namespace}"
+      echo "HiveServer2 port-forward disabled (HIVECTL_HS2_PORT_FORWARD=${HIVECTL_HS2_PORT_FORWARD})"
+      return 0
+   fi
+
+   profileHasHs2Service "${namespace}" || return 0
+   if ! kubectl get svc hiveserver2 -n "${namespace}" >/dev/null 2>&1; then
+      return 0
+   fi
+
+   lb="$(hs2LocalPort "${namespace}" binary)"
+   lh="$(hs2LocalPort "${namespace}" http)"
+   lw="$(hs2LocalPort "${namespace}" webui)"
+   pidfile="$(hs2PortForwardPidFile "${namespace}")"
+   mkdir -p "$(hiveCtlStateDir)"
+
+   if hs2LocalPortConflictMessage "${namespace}" >/dev/null; then
+      hs2LocalPortConflictMessage "${namespace}" >&2
+      return 1
+   fi
+
+   nb="$(hs2DefaultNodePort "${namespace}" binary)"
+   nh="$(hs2DefaultNodePort "${namespace}" http)"
+   nw="$(hs2DefaultNodePort "${namespace}" webui)"
+
+   if hs2PortForwardProcessAlive "${namespace}"; then
+      pid="$(cat "${pidfile}")"
+      echo "HiveServer2 (${namespace}): jdbc/beeline localhost:${lb} · http ${lh} · webui http://127.0.0.1:${lw}/ (pf pid ${pid}; NodePorts ${nb}/${nh}/${nw})"
+      return 0
+   fi
+
+   if startHs2PortForwardProcess "${namespace}"; then
+      local proxy_pid=""
+      pid="$(cat "${pidfile}")"
+      proxy_pid="$(cat "$(hs2WebUiProxyPidFile "${namespace}")" 2>/dev/null)"
+      echo "HiveServer2 (${namespace}): jdbc/beeline localhost:${lb} · http ${lh} · webui http://127.0.0.1:${lw}/ (proxy pid ${proxy_pid:-?}; pf pid ${pid}; NodePorts ${nb}/${nh}/${nw})"
+      return 0
+   fi
+   echo "Warning: could not bind HS2 localhost ports ${lb}/${lh}/${lw}. Try: kubectl port-forward svc/hiveserver2 -n ${namespace} ${lb}:10000 ${lh}:10001 ${lw}:10002" >&2
+   return 1
+}
+function ensureHs2PortForwardsForActiveProfiles(){
+   local ns=""
+
+   for ns in standalone mini llap secure; do
+      profileHasHs2Service "${ns}" || continue
+      kubectl get namespace "${ns}" >/dev/null 2>&1 || continue
+      kubectl get svc hiveserver2 -n "${ns}" >/dev/null 2>&1 || continue
+      ensureHs2PortForward "${ns}" || true
+   done
+}
+function hs2OverlayServiceStarted(){
+   local namespace="$1"
+   local service="$2"
+
+   case "${namespace}" in
+      standalone)
+         [ "${service}" = "hive" ] && return 0
+         ;;
+      mini|llap|secure)
+         [ "${service}" = "hiveserver2" ] && return 0
+         ;;
+   esac
    return 1
 }
 function rangerPortForwardPidFile(){
@@ -1447,6 +1816,81 @@ function reportKindNodeDisk(){
    [ -n "${use}" ] || return 1
    echo "${node} /var ${use}% used"
 }
+# Return 0 when the Hive StorageClass uses rancher.io/local-path with reclaimPolicy Retain.
+function hiveLocalPathStorageClassReady(){
+   local provisioner=""
+   local reclaim=""
+   local sc="${HIVE_STORAGE_CLASS_NAME}"
+
+   kubectl get storageclass "${sc}" >/dev/null 2>&1 || return 1
+   provisioner="$(kubectl get storageclass "${sc}" -o jsonpath='{.provisioner}' 2>/dev/null)"
+   reclaim="$(kubectl get storageclass "${sc}" -o jsonpath='{.reclaimPolicy}' 2>/dev/null)"
+   [ "${provisioner}" = "rancher.io/local-path" ] && [ "${reclaim}" = "Retain" ]
+}
+# Create the Hive StorageClass backed by the Rancher local-path provisioner (Retain).
+function applyHiveLocalPathStorageClass(){
+   local sc="${HIVE_STORAGE_CLASS_NAME}"
+
+   kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ${sc}
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+EOF
+}
+# Ensure local-path-provisioner is running and the Hive StorageClass is ready for PVCs.
+function ensureHiveLocalPathStorageClass(){
+   local provisioner=""
+   local reclaim=""
+   local sc="${HIVE_STORAGE_CLASS_NAME}"
+
+   case "${HIVECTL_STORAGE_CHECK:-1}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+   esac
+
+   if ! kubectl get storageclass >/dev/null 2>&1; then
+      echo "hiveCtl: kubectl cluster not reachable (cannot verify StorageClass ${sc})" >&2
+      return 1
+   fi
+
+   if hiveLocalPathStorageClassReady; then
+      return 0
+   fi
+
+   if kubectl get storageclass "${sc}" >/dev/null 2>&1; then
+      provisioner="$(kubectl get storageclass "${sc}" -o jsonpath='{.provisioner}' 2>/dev/null)"
+      reclaim="$(kubectl get storageclass "${sc}" -o jsonpath='{.reclaimPolicy}' 2>/dev/null)"
+      echo "hiveCtl: StorageClass '${sc}' exists but is provisioner='${provisioner}' reclaimPolicy='${reclaim}'" >&2
+      echo "hiveCtl: expected provisioner rancher.io/local-path and reclaimPolicy Retain (delete the class, then retry start)" >&2
+      return 1
+   fi
+
+   echo "hiveCtl: StorageClass '${sc}' (rancher.io/local-path, Retain) not found — installing local-path-provisioner ..."
+   kubectl apply -f "${HIVECTL_LOCAL_PATH_STORAGE_URL}" || return 1
+   if kubectl get deployment local-path-provisioner -n local-path-storage >/dev/null 2>&1; then
+      kubectl rollout status deployment/local-path-provisioner -n local-path-storage --timeout=180s >/dev/null || {
+         echo "hiveCtl: local-path-provisioner deployment did not become ready" >&2
+         return 1
+      }
+   fi
+
+   applyHiveLocalPathStorageClass || return 1
+
+   if hiveLocalPathStorageClassReady; then
+      echo "hiveCtl: StorageClass '${sc}' is ready (rancher.io/local-path, Retain)"
+      return 0
+   fi
+   echo "hiveCtl: StorageClass '${sc}' still not ready after install" >&2
+   return 1
+}
+function ensureHiveLocalPathStorageClassOnce(){
+   [ "${HIVECTL_STORAGE_CHECKED:-0}" = "1" ] && return 0
+   HIVECTL_STORAGE_CHECKED=1
+   ensureHiveLocalPathStorageClass
+}
 # Prune unused containerd images on Kind nodes when /var is nearly full (avoids ImagePullBackOff).
 function ensureClusterDiskSpace(){
    local max_use=""
@@ -1486,6 +1930,10 @@ function ensureClusterDiskSpaceOnce(){
    HIVECTL_DISK_CHECKED=1
    ensureClusterDiskSpace
 }
+function ensureDeployPrerequisitesOnce(){
+   ensureClusterDiskSpaceOnce
+   ensureHiveLocalPathStorageClassOnce || return 1
+}
 function showClusterDisk(){
    local node=""
    local any=0
@@ -1506,11 +1954,18 @@ function startStack(){
    local component=""
    local components=()
 
-   ensureClusterDiskSpaceOnce
+   ensureDeployPrerequisitesOnce || return 1
 
    case "${namespace}" in
       standalone)
-         components=(hive)
+         ensureHueSecrets "${namespace}" || return 1
+         ensureAdminSecrets "${namespace}" || return 1
+         components=(mysql hive hue)
+         ;;
+      mini)
+         ensureHueSecrets "${namespace}" || return 1
+         ensureAdminSecrets "${namespace}" || return 1
+         components=(hadoop mysql hivemetastore hiveserver2 hue)
          ;;
       llap)
          ensureHueSecrets "${namespace}" || return 1
@@ -1539,25 +1994,28 @@ function startStack(){
    done
    ensureProfileUiPortForwards "${namespace}" || true
 }
+# Refresh Hue port-forwards for every profile that still has hue-0 (avoids stale single-port 8888).
+function ensureHuePortForwardsForActiveProfiles(){
+   local ns=""
+
+   for ns in standalone mini llap secure; do
+      profileHasHue "${ns}" || continue
+      kubectl get namespace "${ns}" >/dev/null 2>&1 || continue
+      kubectl get svc hue -n "${ns}" >/dev/null 2>&1 || continue
+      ensureHuePortForward "${ns}" || true
+   done
+}
 # Start or refresh localhost port-forwards for Hue / Ranger after full stack or restore.
 function ensureProfileUiPortForwards(){
    local namespace="$1"
 
-   case "${namespace}" in
-      secure)
-         if kubectl get svc ranger -n "${namespace}" >/dev/null 2>&1; then
-            ensureRangerPortForward "${namespace}" || true
-         fi
-         if profileHasHue "${namespace}" && kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
-            ensureHuePortForward "${namespace}" || true
-         fi
-         ;;
-      llap)
-         if profileHasHue "${namespace}" && kubectl get svc hue -n "${namespace}" >/dev/null 2>&1; then
-            ensureHuePortForward "${namespace}" || true
-         fi
-         ;;
-   esac
+   if [ "${namespace}" = "secure" ]; then
+      if kubectl get svc ranger -n "${namespace}" >/dev/null 2>&1; then
+         ensureRangerPortForward "${namespace}" || true
+      fi
+   fi
+   ensureHuePortForwardsForActiveProfiles
+   ensureHs2PortForwardsForActiveProfiles
 }
 # Stop all components in reverse dependency order.
 function stopStack(){
@@ -1569,7 +2027,10 @@ function stopStack(){
 
    case "${namespace}" in
       standalone)
-         components=(hive)
+         components=(hue hive mysql)
+         ;;
+      mini)
+         components=(hue hiveserver2 hivemetastore mysql hadoop)
          ;;
       llap)
          components=(hue hiveserver2 llapdaemon hivemetastore zookeeper mysql hadoop)
@@ -1707,7 +2168,7 @@ function backupStandaloneStack(){
    fi
 
    requireNamespace "${namespace}" || return 1
-   ensureClusterDiskSpaceOnce
+   ensureDeployPrerequisitesOnce || return 1
    mkdir -p "${backup_dir}" || return 1
    echo "Creating standalone backup in: ${backup_dir}"
    backupSecrets "${namespace}" "${backup_dir}" || return 1
@@ -1761,7 +2222,7 @@ function restoreStandaloneStack(){
       return 1
    fi
 
-   ensureClusterDiskSpaceOnce
+   ensureDeployPrerequisitesOnce || return 1
 
    restoreSecrets "${namespace}" "${backup_dir}" || return 1
    echo "Restoring standalone backup from: ${backup_dir}"
@@ -1823,6 +2284,7 @@ Typical PVCs:
   - pvc-derby
   - pvc-warehouse
   - pvc-logs
+  - mysql-mysql-0 (Hue DB when Hue is enabled)
 
 Cleanup removes every PVC in the namespace, every PV bound to it, and
 /var/local-path-provisioner/pvc-*_${namespace}_* on Kind nodes (same as secure).
@@ -2190,7 +2652,7 @@ function backupStack(){
 
    requireNamespace "${namespace}" || return 1
 
-   ensureClusterDiskSpaceOnce
+   ensureDeployPrerequisitesOnce || return 1
 
    mkdir -p "${backup_dir}" || return 1
    echo "Creating backup in: ${backup_dir}"
@@ -2260,7 +2722,7 @@ function restoreStack(){
       return 1
    fi
 
-   ensureClusterDiskSpaceOnce
+   ensureDeployPrerequisitesOnce || return 1
 
    restoreSecrets "${namespace}" "${backup_dir}" || return 1
 
@@ -2435,11 +2897,8 @@ function passwdAliasesForOverlay(){
       secure)
          echo "mysql-root hive-mysql hue-mysql hue-secret-key ranger-admin ranger-db krb5-master krb5-kadmin root hive hadoop beeline admin"
          ;;
-      llap|mini)
+      standalone|llap|mini)
          echo "mysql-root hive-mysql hue-mysql hue-secret-key root hive hadoop beeline admin"
-         ;;
-      standalone)
-         echo "root hive hadoop beeline admin"
          ;;
       *)
          return 1
@@ -2479,8 +2938,7 @@ EOF
       echo ""
       echo "Profiles:"
       echo "  secure:     mysql-root hive-mysql hue-mysql hue-secret-key ranger-admin ranger-db krb5-master krb5-kadmin root hive hadoop beeline admin"
-      echo "  llap, mini: mysql-root hive-mysql hue-mysql hue-secret-key root hive hadoop beeline admin"
-      echo "  standalone: root hive hadoop beeline admin"
+      echo "  standalone, mini, llap: mysql-root hive-mysql hue-mysql hue-secret-key root hive hadoop beeline admin"
       echo ""
       echo "List keys present in a cluster:  hiveCtl list passwd <overlay>"
       return 0

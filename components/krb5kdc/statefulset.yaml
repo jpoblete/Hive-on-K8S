@@ -90,7 +90,7 @@ spec:
         labels:
           app: krb5kdc
       spec:
-        storageClassName: standard
+        storageClassName: hive-on-k8s-local-path
         accessModes:
           - ReadWriteOnce
         resources:

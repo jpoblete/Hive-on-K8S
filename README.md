@@ -30,7 +30,7 @@ Read **Profiles** in order (simplest first). UIs and kind setup are grouped unde
 - [Prerequisites](#prerequisites) · [Hardware](#hardware-requirements)
 - [**Profiles**](#profiles) — `standalone` → `mini` → `llap` → `secure`
 - [**Secure profile (detailed)**](docs/secure-profile.md) — Kerberos ZK, Tez jar cache, disk, smoke tests
-- [Browser UIs & kind (`llap` / `secure`)](#browser-uis-and-kind-llap--secure)
+- [Browser UIs & kind (all Hue profiles)](#browser-uis-and-kind-llap--secure)
 - [Data safety](#data-safety) · [Bootstrap model](#bootstrap-model) · [Lab OS users](#lab-os-users-supergroup)
 - [Smoke tests](#smoke-tests) · [Validation](#validation)
 
@@ -38,8 +38,10 @@ Read **Profiles** in order (simplest first). UIs and kind setup are grouped unde
 
 ```text
 standalone:   apache/hive:4.2.0   (embedded Metastore + HiveServer2 in one pod)
+              gethue/hue:latest (Hue → HS2; MySQL pod for Hue DB only)
 mini:         apache/hive:4.2.0   (Hive Metastore + HiveServer2)
               apache/hadoop:3.4.1 (single-node HDFS in one pod)
+              gethue/hue:latest
 llap:         apache/hive:nightly (Hive Metastore x2, HiveServer2 x2, LLAP daemon x2)
               apache/hadoop:3.4.1, gethue/hue:latest
 secure:       apache/hive:nightly (same LLAP stack as llap: Metastore x2, HiveServer2 x2, LLAP daemon x2)
@@ -131,27 +133,31 @@ Profiles are documented **simplest first**, each step adding services and operat
 
 ```text
 standalone  →  mini  →  llap  →  secure
-  Derby          HDFS+MySQL     ZK; 2 HMS/HS2/LLAP  same Hive tier +
+  Derby+Hue      HDFS+MySQL     ZK; 2 HMS/HS2/LLAP  same Hive tier +
   one pod        1 MS, 1 HS2    + Hue               KDC, Kerberos HDFS
+                 + Hue          (all four ship Hue)
 ```
 
 ### `standalone`
 
 | | |
 |--|--|
-| **Adds** | One pod: embedded Metastore + HiveServer2, Derby, local PVC warehouse |
-| **Overlay** | `overlays/standalone/hive` |
+| **Adds** | One pod: embedded Metastore + HiveServer2, Derby, local PVC warehouse; MySQL (Hue DB only); Hue |
+| **Stack** | `mysql → hive → hue` (Derby metastore stays in the Hive pod) |
+| **Overlays** | `overlays/standalone/hive`, `mysql`, `hue` |
 | **Start / stop** | `./hiveCtl.sh start standalone` · `./hiveCtl.sh stop standalone` |
+| **UIs** | Hue **http://localhost:8885** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
 | **Try it** | [Smoke tests → standalone](#smoke-tests) |
 
 ### `mini`
 
 | | |
 |--|--|
-| **Adds** | HDFS (one Hadoop pod), MySQL, Hive Metastore, HiveServer2 |
-| **Stack** | `hadoop → mysql → hivemetastore → hiveserver2` |
+| **Adds** | HDFS (one Hadoop pod), MySQL, Hive Metastore, HiveServer2, Hue |
+| **Stack** | `hadoop → mysql → hivemetastore → hiveserver2 → hue` |
 | **Overlays** | `overlays/mini/*` |
 | **Start / stop** | `./hiveCtl.sh start mini` · `./hiveCtl.sh stop mini` |
+| **UIs** | Hue **http://localhost:8886** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
 | **HDFS** | `kubectl exec hadoop-0 -n mini -- hdfs dfs -ls /` |
 | **Try it** | [Smoke tests → mini](#smoke-tests) |
 
@@ -166,7 +172,7 @@ standalone  →  mini  →  llap  →  secure
 | **Overlays** | `overlays/llap/*` — shared `hive-site.xml` in `llap/hivemetastore` |
 | **Prerequisite** | Label **two** workers `node-role.kubernetes.io/llap` or use [`kind/llap-cluster.yaml`](kind/llap-cluster.yaml) ([details](#browser-uis-and-kind-llap--secure)) |
 | **Start / stop** | `./hiveCtl.sh start llap` · `./hiveCtl.sh stop llap` |
-| **UIs** | Hue **http://localhost:8888** · LLAP **http://localhost:15002** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
+| **UIs** | Hue **http://localhost:8887** · LLAP **http://localhost:15002** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
 | **Query path** | Tez AM in HiveServer2 (**local mode**, no YARN) → fragments on `@llap0` daemons; Beeline via ZK (`BEELINE_URL` in pods) |
 | **Logs on HDFS** | `hdfs://nameservice:8020/user/hive/logs/llap/…` — `tez/application_*`, `llap/application_*`, stable `*.log` ([`samples/logging/`](samples/logging/README.md)) |
 | **Try it** | [Smoke tests → llap](#smoke-tests) |
@@ -200,29 +206,54 @@ standalone  →  mini  →  llap  →  secure
 
 <a id="secure-hue"></a>
 
-## Browser UIs and kind (`llap` / `secure`)
+## Browser UIs and kind (`standalone` / `mini` / `llap` / `secure`)
 
-Both profiles ship **[Hue](https://gethue.com/)** (`gethue/hue:latest`). **`llap`**: JDBC user **`hive`** / **`beeline-password`**. **`secure`**: browser login stays Hue-local; HS2 uses Kerberos ([secure Hue](#secure-hue)).
+All four profiles ship **[Hue](https://gethue.com/)** (`gethue/hue:latest`). **`standalone`**, **`mini`**, and **`llap`**: JDBC user **`hive`** / **`beeline-password`**. **`secure`**: browser login stays Hue-local; HS2 uses Kerberos ([secure Hue](#secure-hue)).
 
-| UI | URL (typical) | `hiveCtl` |
-|----|---------------|-----------|
-| Hue | **http://localhost:8888** | Auto port-forward after start (or kind NodePort **30888** / **30889**) |
-| LLAP daemon (`llap` / `secure`) | **http://localhost:15002** | Forwards **`llapdaemon-0`** after start |
+Each profile uses a **different localhost port** so two stacks can stay up without colliding (NodePorts **30886–30889**).
+
+| Profile | Hue URL (typical) | NodePort |
+|---------|-------------------|----------|
+| **`standalone`** | **http://localhost:8885/hue/accounts/login** | **30886** |
+| **`mini`** | **http://localhost:8886/hue/accounts/login** | **30887** |
+| **`llap`** | **http://localhost:8887/hue/accounts/login** | **30888** |
+| **`secure`** | **http://localhost:8888/hue/accounts/login** | **30889** |
+
+**HiveServer2** (Thrift **10000**, HTTP **10001**, Web UI **10002**) is exposed the same way: **`svc/hiveserver2`** is **NodePort** in every profile, and **`hiveCtl`** port-forwards three localhost ports per profile (no collision across overlays):
+
+| Profile | Beeline / JDBC (Thrift) | HTTP transport | Web UI | NodePorts (10000 / 10001 / 10002) |
+|---------|-------------------------|----------------|--------|-----------------------------------|
+| **`standalone`** | **localhost:11000** | **11001** | **http://localhost:11002/** | **31000–31002** |
+| **`mini`** | **localhost:11100** | **11101** | **http://localhost:11102/** | **31010–31012** |
+| **`llap`** | **localhost:11200** | **11201** | **http://localhost:11202/** | **31020–31022** |
+| **`secure`** | **localhost:11300** | **11301** | **http://localhost:11302/** | **31030–31032** |
+
+| UI | `hiveCtl` |
+|----|-----------|
+| Hue | Auto **`kubectl port-forward`** per active profile after **`start`** / **`restore`** |
+| HiveServer2 | Auto forward **`svc/hiveserver2`** after **`hive`** / **`hiveserver2`** start |
+| LLAP daemon (`llap` / `secure`) | **http://localhost:15002** — forwards **`llapdaemon-0`** after start |
 
 ```bash
-./hiveCtl.sh start llap    # or: start secure
-# Manual if needed:
-kubectl port-forward svc/hue -n llap 8888:8888
+./hiveCtl.sh start standalone   # or: mini, llap, secure
+# Manual if needed (match local port to profile):
+kubectl port-forward svc/hue -n standalone 8885:8888
+kubectl port-forward svc/hue -n mini 8886:8888
+kubectl port-forward svc/hue -n llap 8887:8888
+kubectl port-forward svc/hue -n secure 8888:8888
+kubectl port-forward svc/hiveserver2 -n mini 11100:10000 11101:10001 11102:10002
 kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
 ```
 
 | Env | Default | Purpose |
 |-----|---------|---------|
 | `HIVECTL_HUE_PORT_FORWARD` | `auto` | `0` = no Hue port-forward |
-| `HIVECTL_HUE_LOCAL_PORT` | `8888` | Local Hue port |
+| `HIVECTL_HUE_LOCAL_PORT` | *(per profile)* | Overrides **all** profiles to one port (avoid unless only one Hue is running) |
+| `HIVECTL_HS2_PORT_FORWARD` | `auto` | `0` = no HiveServer2 port-forward |
+| `HIVECTL_HS2_LOCAL_PORT_BASE` | *(per profile)* | Overrides the **first** local HS2 port (http/webui use base+1/+2) |
 | `HIVECTL_LLAP_DAEMON_LOCAL_PORT` | `15002` | Local LLAP UI port |
 
-**kind for `llap` / `secure`:** LLAP daemons need **two** workers labeled **`node-role.kubernetes.io/llap`**. Recommended: **`kind create cluster --config kind/llap-cluster.yaml`** (labels **`desktop-worker4`** / **`desktop-worker5`**, maps **8888** for Hue). **`secure`** also needs **three** schedulable workers for DataNode PVCs. Otherwise: `kubectl label node <worker4> <worker5> node-role.kubernetes.io/llap=` before start.
+**kind:** LLAP daemons need **two** workers labeled **`node-role.kubernetes.io/llap`**. Recommended: **`kind create cluster --config kind/llap-cluster.yaml`** (labels **`desktop-worker4`** / **`desktop-worker5`**, maps Hue **8885→30886** through **8888→30889** and HS2 **11000→31000** through **11302→31032** on the control-plane). **`secure`** also needs **three** schedulable workers for DataNode PVCs. Recreate the cluster after changing port mappings. Otherwise: `kubectl label node <worker4> <worker5> node-role.kubernetes.io/llap=` before start.
 
 ## Data safety
 
@@ -247,6 +278,8 @@ On **`secure`**, a full **`/var`** often shows up as failed Tez **`hdfs://…/.h
 
 PVCs hold the persistent data. Deleting PVCs can cause data loss.
 
+All profile PVCs use StorageClass **`hive-on-k8s-local-path`** (`rancher.io/local-path`, **`reclaimPolicy: Retain`**). Before **`start`** / **`restore`**, **`hiveCtl.sh`** installs the Rancher local-path provisioner when needed and creates that class (override with **`HIVE_STORAGE_CLASS_NAME`**).
+
 `hiveCtl.sh` creates namespace-local Kubernetes Secrets at startup instead of storing passwords in Git. Backups include a portable copy of those generated credentials:
 
 ```text
@@ -264,7 +297,7 @@ Typical keys in Secret **`hive-credentials`** (namespace = profile name):
 | `hive-metastore-password` | MySQL user for the Hive metastore schema |
 | `mysql-root-password` | MySQL `root` |
 | `admin-password` | Documented copy of the fixed lab **`admin`** password (always **`admin`**) |
-| `hue-mysql-password`, `hue-secret-key` | **`llap`** and **`secure`** Hue |
+| `hue-mysql-password`, `hue-secret-key` | **`standalone`**, **`mini`**, **`llap`**, and **`secure`** Hue |
 | `krb5-master-password`, `krb5-kadmin-password` | **`secure`** MIT KDC only |
 
 Treat backup directories as sensitive because they contain both data and credentials.
@@ -421,7 +454,7 @@ LLAP Hue — [Browser UIs](#browser-uis-and-kind-llap--secure):
 ```bash
 kubectl get pods,svc -n llap -l app=hue
 kubectl wait --for=condition=ready pod -l app=hue -n llap --timeout=300s
-# → http://localhost:8888 (kind template or port-forward)
+# → http://localhost:8887 (kind template or port-forward)
 ```
 
 LLAP daemon UI — [Browser UIs](#browser-uis-and-kind-llap--secure):
@@ -479,8 +512,8 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8888/
 Render all overlays:
 
 ```bash
-for d in overlays/standalone/hive \
-         overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 \
+for d in overlays/standalone/hive overlays/standalone/mysql overlays/standalone/hue \
+         overlays/mini/hadoop overlays/mini/mysql overlays/mini/hivemetastore overlays/mini/hiveserver2 overlays/mini/hue \
          overlays/llap/hadoop overlays/llap/mysql overlays/llap/zookeeper overlays/llap/hivemetastore overlays/llap/llapdaemon overlays/llap/hiveserver2 overlays/llap/hue \
          overlays/secure/krb5kdc overlays/secure/hadoop-namenode overlays/secure/hadoop-datanode overlays/secure/mysql \
          overlays/secure/zookeeper overlays/secure/hivemetastore overlays/secure/llapdaemon overlays/secure/hiveserver2 overlays/secure/hue; do

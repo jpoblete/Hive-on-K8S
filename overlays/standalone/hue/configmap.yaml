@@ -1,0 +1,84 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hue
+  namespace: standalone
+  labels:
+    app: hue
+data:
+  init-hue-db.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    host="${MYSQL_HOST:-mysql.standalone.svc.cluster.local}"
+    port="${MYSQL_PORT:-3306}"
+    echo "Waiting for MySQL at ${host}:${port} ..."
+    for i in $(seq 1 120); do
+      if mysqladmin ping -h "${host}" -P "${port}" -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
+        break
+      fi
+      sleep 2
+    done
+    mysql -h "${host}" -P "${port}" -uroot -p"${MYSQL_ROOT_PASSWORD}" <<EOF
+    CREATE DATABASE IF NOT EXISTS hue CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+    CREATE USER IF NOT EXISTS 'hue'@'%' IDENTIFIED BY '${HUE_MYSQL_PASSWORD}';
+    ALTER USER 'hue'@'%' IDENTIFIED BY '${HUE_MYSQL_PASSWORD}';
+    GRANT ALL PRIVILEGES ON hue.* TO 'hue'@'%';
+    FLUSH PRIVILEGES;
+    EOF
+    echo "Hue database ready."
+  render-hue-ini.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    conf_dir="/usr/share/hue/desktop/conf"
+    mkdir -p "${conf_dir}"
+    sed \
+      -e "s|__HUE_MYSQL_PASSWORD__|${HUE_MYSQL_PASSWORD}|g" \
+      -e "s|__HUE_SECRET_KEY__|${HUE_SECRET_KEY}|g" \
+      -e "s|__BEELINE_PASSWORD__|${BEELINE_PASSWORD}|g" \
+      /config/hue.ini.template > "${conf_dir}/hue.ini"
+  hue-migrate.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    /config/render-hue-ini.sh
+    cd /usr/share/hue
+    ./build/env/bin/hue migrate --noinput
+  entrypoint.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    /config/render-hue-ini.sh
+    cd /usr/share/hue
+    exec ./build/env/bin/supervisor
+  hue.ini.template: |
+    [desktop]
+    secret_key=__HUE_SECRET_KEY__
+    http_host=0.0.0.0
+    http_port=8888
+    use_allowed_hosts=false
+    app_blacklist=search,hbase,oozie,pig,sqoop,zookeeper,security,spark,jobbrowser,impala
+
+    [[database]]
+    engine=mysql
+    host=mysql.standalone.svc.cluster.local
+    port=3306
+    user=hue
+    password=__HUE_MYSQL_PASSWORD__
+    name=hue
+
+    [beeswax]
+    hive_server_host=hiveserver2.standalone.svc.cluster.local
+    hive_server_port=10000
+    auth_username=hive
+    auth_password=__BEELINE_PASSWORD__
+    server_conn_timeout=120
+    list_partitions_limit=10000
+    close_queries=open
+
+    [notebook]
+    enable_all_interpreters=false
+    interpreters_shown_on_wheel=hive
+    [[interpreters]]
+    [[[hive]]]
+    name=Hive
+    interface=hiveserver2

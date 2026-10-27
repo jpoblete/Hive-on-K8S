@@ -178,7 +178,9 @@ patches:
         value:
           port: 10000
           targetPort: 10000
+          nodePort: 31030
           name: binary
+          protocol: TCP
     target:
       kind: Service
       name: hivemetastore
@@ -189,7 +191,9 @@ patches:
         value:
           port: 10001
           targetPort: 10001
+          nodePort: 31031
           name: http
+          protocol: TCP
     target:
       kind: Service
       name: hivemetastore
@@ -200,7 +204,17 @@ patches:
         value:
           port: 10002
           targetPort: 10002
+          nodePort: 31032
           name: webui
+          protocol: TCP
+    target:
+      kind: Service
+      name: hivemetastore
+
+  - patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
     target:
       kind: Service
       name: hivemetastore

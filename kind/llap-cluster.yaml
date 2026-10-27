@@ -11,7 +11,11 @@
 # Create:
 #   kind create cluster --name desktop --config kind/llap-cluster.yaml
 #
-# Hue: control-plane extraPortMappings expose NodePort 30888 at http://localhost:8888
+# Hue NodePorts on control-plane (no collision when multiple profiles run):
+#   standalone 30886 → :8885 · mini 30887 → :8886 · llap 30888 → :8887 · secure 30889 → :8888
+# HiveServer2 NodePorts (binary / http / webui → localhost base+0/+1/+2):
+#   standalone 31000-31002 → 11000-11002 · mini 31010-31012 → 11100-11102
+#   llap 31020-31022 → 11200-11202 · secure 31030-31032 → 11300-11302
 #
 # Requires Docker Desktop (or similar) with enough RAM/disk for llap (see README).
 
@@ -21,9 +25,53 @@ name: desktop
 nodes:
   - role: control-plane
     extraPortMappings:
-      # Hue NodePort (30888) → http://localhost:8888 on the host
+      - containerPort: 30886
+        hostPort: 8885
+        protocol: TCP
+      - containerPort: 30887
+        hostPort: 8886
+        protocol: TCP
       - containerPort: 30888
+        hostPort: 8887
+        protocol: TCP
+      - containerPort: 30889
         hostPort: 8888
+        protocol: TCP
+      - containerPort: 31000
+        hostPort: 11000
+        protocol: TCP
+      - containerPort: 31001
+        hostPort: 11001
+        protocol: TCP
+      - containerPort: 31002
+        hostPort: 11002
+        protocol: TCP
+      - containerPort: 31010
+        hostPort: 11100
+        protocol: TCP
+      - containerPort: 31011
+        hostPort: 11101
+        protocol: TCP
+      - containerPort: 31012
+        hostPort: 11102
+        protocol: TCP
+      - containerPort: 31020
+        hostPort: 11200
+        protocol: TCP
+      - containerPort: 31021
+        hostPort: 11201
+        protocol: TCP
+      - containerPort: 31022
+        hostPort: 11202
+        protocol: TCP
+      - containerPort: 31030
+        hostPort: 11300
+        protocol: TCP
+      - containerPort: 31031
+        hostPort: 11301
+        protocol: TCP
+      - containerPort: 31032
+        hostPort: 11302
         protocol: TCP
   - role: worker
   - role: worker

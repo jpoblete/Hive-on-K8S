@@ -40,19 +40,22 @@ metadata:
     app: hive
     component: hiveserver2
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: hive
   ports:
     - name: binary
       port: 10000
       targetPort: 10000
+      nodePort: 31000
       protocol: TCP
     - name: http
       port: 10001
       targetPort: 10001
+      nodePort: 31001
       protocol: TCP
     - name: webui
       port: 10002
       targetPort: 10002
+      nodePort: 31002
       protocol: TCP

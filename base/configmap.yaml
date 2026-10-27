@@ -636,6 +636,13 @@ data:
        id
        env
        echo "Starting ${SERVICE^} as user: $(whoami)"
+       # HS2 Web UI must not prefer hive-beeline-*-standalone.jar (incomplete webapp; breaks Jetty unpack).
+       if [ "${SERVICE}" = "hiveserver2" ]; then
+          for beeline_jar in "${HIVE_HOME}/lib"/hive-beeline-*-standalone.jar; do
+             [ -e "${beeline_jar}" ] || continue
+             mv "${beeline_jar}" "${beeline_jar}.off-hs2-webui"
+          done
+       fi
        hive_service_extra=()
        if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ]; then
           hive_service_extra=(--hiveconf "hive.user.install.directory=/opt/hive/install_dir/${POD_NAME}")

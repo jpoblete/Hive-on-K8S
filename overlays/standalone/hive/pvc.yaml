@@ -10,7 +10,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: standard
+  storageClassName: hive-on-k8s-local-path
   resources:
     requests:
       storage: 1Gi
@@ -25,7 +25,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: standard
+  storageClassName: hive-on-k8s-local-path
   resources:
     requests:
       storage: 1Gi
@@ -40,7 +40,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: standard
+  storageClassName: hive-on-k8s-local-path
   resources:
     requests:
       storage: 1Gi

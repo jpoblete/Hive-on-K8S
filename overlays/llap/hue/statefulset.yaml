@@ -96,19 +96,19 @@ spec:
                   key: beeline-password
           startupProbe:
             httpGet:
-              path: /
+              path: /hue/accounts/login
               port: http
             periodSeconds: 10
             failureThreshold: 60
           readinessProbe:
             httpGet:
-              path: /
+              path: /hue/accounts/login
               port: http
             periodSeconds: 10
             failureThreshold: 6
           livenessProbe:
             httpGet:
-              path: /
+              path: /hue/accounts/login
               port: http
             periodSeconds: 30
             failureThreshold: 3

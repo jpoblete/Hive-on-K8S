@@ -31,7 +31,7 @@ HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure
 # Manual fallback: kubectl port-forward -n secure svc/ranger 6080:6080
 ```
 
-**Hue** on `llap` / `secure` uses the same mechanism at **http://localhost:8888/** (`HIVECTL_HUE_PORT_FORWARD=0` to disable).
+**Hue** on **`standalone`** / **`mini`** / **`llap`** / **`secure`** uses the same mechanism at **http://localhost:8885/** through **:8888/** (`HIVECTL_HUE_PORT_FORWARD=0` to disable).
 
 **Browser URL:** use **http://127.0.0.1:6080/login.jsp** (matches `policymgr_external_url` in the overlay). If you use a different host/port, set **`RANGER_EXTERNAL_URL`** on the render init container (via kustomize) or login may loop back to the login page.
 
@@ -91,7 +91,7 @@ Ranger stores policies in MySQL database **`ranger`** on **`mysql-0`**. **`./hiv
 
 After restore with Phase 2 HS2, rebuild/load the custom image if Kind pruned it (`docker/hive-ranger/README.md`), then **`HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2`**. Wait ~30s for policy poll or restart HS2 before testing authorization.
 
-**Localhost UIs:** **`restore`** and **`start secure`** call **`ensureProfileUiPortForwards`** so **Hue** (`http://localhost:8888/`) and **Ranger** (`http://localhost:6080/login.jsp`) get **`kubectl port-forward`** plus the background monitor (same as starting **`hue`** / **`ranger`** alone). Disable with **`HIVECTL_HUE_PORT_FORWARD=0`** / **`HIVECTL_RANGER_PORT_FORWARD=0`**.
+**Localhost UIs:** **`restore`** and **`start`** call **`ensureProfileUiPortForwards`** so **Hue** (per-profile localhost ports; **`secure`** → **http://localhost:8888/**) and **Ranger** (`http://localhost:6080/login.jsp`) get **`kubectl port-forward`** plus the background monitor. Disable with **`HIVECTL_HUE_PORT_FORWARD=0`** / **`HIVECTL_RANGER_PORT_FORWARD=0`**.
 
 If the backup has no **`secure_hive`** rows in **`mysql-ranger.sql`**, start HS2 with **`HIVECTL_SECURE_RANGER_HS2=1`** so bootstrap runs automatically, or run **`./scripts/secure-ranger-bootstrap-hive.sh secure`** once Ranger is Ready.
 

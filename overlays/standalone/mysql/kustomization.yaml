@@ -1,0 +1,15 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - serviceaccount.yaml
+  - ../../../components/mysql
+patches:  
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: standalone
+    target:
+      name: mysql  
+#EOF      

@@ -1,0 +1,134 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hue
+  namespace: standalone
+  labels:
+    app: hue
+spec:
+  serviceName: hue-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hue
+  template:
+    metadata:
+      labels:
+        app: hue
+    spec:
+      serviceAccountName: hue
+      automountServiceAccountToken: false
+      initContainers:
+        - name: hue-db-init
+          image: mysql:8.4
+          command: ["/bin/bash", "/config/init-hue-db.sh"]
+          env:
+            - name: MYSQL_HOST
+              value: mysql.standalone.svc.cluster.local
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: mysql-root-password
+            - name: HUE_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-mysql-password
+          volumeMounts:
+            - name: hue-config
+              mountPath: /config
+              readOnly: true
+        - name: hue-migrate
+          image: gethue/hue:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/config/hue-migrate.sh"]
+          env:
+            - name: HUE_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-mysql-password
+            - name: HUE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-secret-key
+            - name: BEELINE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: beeline-password
+          volumeMounts:
+            - name: hue-config
+              mountPath: /config
+              readOnly: true
+            - name: hue-conf
+              mountPath: /usr/share/hue/desktop/conf
+      containers:
+        - name: hue
+          image: gethue/hue:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/config/entrypoint.sh"]
+          ports:
+            - name: http
+              containerPort: 8888
+              protocol: TCP
+          env:
+            - name: HUE_MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-mysql-password
+            - name: HUE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: hue-secret-key
+            - name: BEELINE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hive-credentials
+                  key: beeline-password
+          startupProbe:
+            httpGet:
+              path: /hue/accounts/login
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /hue/accounts/login
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /hue/accounts/login
+              port: http
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: hue-config
+              mountPath: /config
+              readOnly: true
+            - name: hue-conf
+              mountPath: /usr/share/hue/desktop/conf
+      volumes:
+        - name: hue-conf
+          emptyDir: {}
+        - name: hue-config
+          configMap:
+            name: hue
+            defaultMode: 0555
