@@ -18,6 +18,15 @@ For day-to-day commands, see [README.md](../README.md) (profiles, `hiveCtl`, smo
 
 Stack order: **`krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue`**.
 
+**Hive SYS schema:** After HiveServer2 is Ready, `hiveCtl` runs this once on **`hiveserver2-0`** as user **`hive`** (same `BEELINE_URL` as the pod; `kinit` uses `hive/$(hostname -f)@SECURE.LAB` and `/home/hive/host-service.keytab`):
+
+```bash
+schematool -initSchema -dbType hive -metaDbType mysql \
+  -url 'jdbc:hive2://zookeeper-0.zookeeper.secure.svc.cluster.local:2181/default;serviceDiscoveryMode=zooKeeper;zooKeeperNamespace=hiveserver2;auth=KERBEROS;principal=hive/_HOST@SECURE.LAB'
+```
+
+Later `start` / `restart` skips the step when MySQL `hive.DBS` already contains `sys`. A `schematool` result that the schema is already initialized does not fail the stack. JDBC is retried for a short window after Ready so ZooKeeper registration can finish. Skip entirely with **`HIVECTL_HIVE_SYS_SCHEMA=0`**. The same init runs for **standalone** (`derby`), **mini**, and **llap** (`mysql`) with each profile's own `BEELINE_URL`.
+
 **Optional:** [Apache Ranger](secure-ranger.md) Phase 1 (Admin UI) — `./hiveCtl.sh start secure ranger` or **`HIVECTL_SECURE_RANGER=1`**. Hive/HDFS plugins not wired yet. For Ranger authorization, **`hive.server2.enable.doAs=false`** and **`hive.metastore.execute.setugi=false`** (already set in the secure overlay; see [secure-ranger.md](secure-ranger.md)).
 
 ## Kerberos ZooKeeper

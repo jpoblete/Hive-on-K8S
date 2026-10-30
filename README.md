@@ -362,6 +362,8 @@ The long-running services then run as:
 
 This keeps the upstream images unchanged while still making the lab reproducible.
 
+After HiveServer2 is Ready, `hiveCtl` initializes the Hive **SYS** schema once on a single pod: `schematool -initSchema -dbType hive`, using that pod's `BEELINE_URL`. The pod is `hiveserver2-0` for **mini**, **llap**, and **secure**, and `hive-0` container `hiveserver2` for **standalone**. `-metaDbType` is `mysql` for **mini**, **llap**, and **secure**, and `derby` for **standalone**. **secure** runs `kinit -kt /home/hive/host-service.keytab hive/<pod FQDN>@SECURE.LAB` as user `hive` before `schematool`. The step is skipped when database `sys` is already present: MySQL `hive.DBS`, or the Derby warehouse directory `sys.db` (the embedded Derby metastore stays locked by the Metastore JVM). If `schematool` reports the schema is already initialized, startup continues. HiveServer2 JDBC (including ZooKeeper discovery) is retried briefly after Ready. Disable with `HIVECTL_HIVE_SYS_SCHEMA=0`.
+
 The Hadoop container restarts itself when HDFS stops answering: its liveness probe runs `hdfs dfs -ls -R /` and checks the DataNode port every 30 seconds, and three failures in a row restart it. The daemon logs live on the Hadoop volume under `/hdfs/logs`, so they survive the restart for a post mortem:
 
 ```bash

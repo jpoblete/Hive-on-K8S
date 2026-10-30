@@ -67,6 +67,10 @@ function help(){
    echo "  Image: HIVE_RANGER_IMAGE=hive-on-k8s/hive-ranger:2.4.0-nightly (default)"
    echo "  Kind: hiveCtl runs 'kind load docker-image' for that tag when present locally (HIVECTL_KIND_LOAD=0 to skip)"
    echo "  Kind cluster name: HIVECTL_KIND_CLUSTER_NAME or KIND_CLUSTER (else inferred from node name, e.g. desktop)"
+   echo "Hive SYS schema: after HiveServer2 is Ready, hiveCtl runs schematool -initSchema -dbType hive once on one HS2 pod"
+   echo "  (standalone: hive-0 container hiveserver2). JDBC URL is that pod's BEELINE_URL. metaDbType mysql (mini|llap|secure) or derby (standalone)."
+   echo "  Skips when database sys already exists. Disable: HIVECTL_HIVE_SYS_SCHEMA=0"
+   echo "  Retries: HIVECTL_HIVE_SYS_SCHEMA_ATTEMPTS=6  HIVECTL_HIVE_SYS_SCHEMA_RETRY_SEC=10"
    echo "Disk: before start/restore, hiveCtl checks Kind /var on all nodes (mini, llap, secure, standalone)"
    echo "  Prune when use exceeds threshold: HIVECTL_DISK_MAX_USE_PERCENT=90 (HIVECTL_DISK_CHECK=0 to skip)"
    echo "Storage: before start/restore, hiveCtl requires StorageClass ${HIVE_STORAGE_CLASS_NAME} (rancher.io/local-path, Retain)"
@@ -752,6 +756,7 @@ function startOverlay(){
    fi
    if hs2OverlayServiceStarted "${namespace}" "${service}"; then
       ensureHs2PortForward "${namespace}" || true
+      ensureHiveSysSchema "${namespace}" || return 1
    fi
    if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
       ensureRangerPortForward "${namespace}" || true
@@ -1395,6 +1400,164 @@ function hs2OverlayServiceStarted(){
          ;;
    esac
    return 1
+}
+# True when automatic schematool -initSchema -dbType hive should be skipped.
+function hiveSysSchemaDisabled(){
+   case "${HIVECTL_HIVE_SYS_SCHEMA:-auto}" in
+      0|false|no|off|disable|disabled) return 0 ;;
+      *) return 1 ;;
+   esac
+}
+# Return 0 when schematool output means the Hive SYS schema is already present.
+function hiveSysSchemaAlreadyInitialized(){
+   local log="$1"
+
+   printf '%s\n' "${log}" | grep -Eiq \
+      "already initialized|database '?sys'? already exists|duplicate entry 'sys'|table 'sys\\.version' already exists"
+}
+# Return 0 when the Hive sys database is already recorded.
+# MySQL: hive.DBS. Derby: warehouse directory, because embedded Derby stays locked by the Metastore JVM.
+# Return 1 when the schema is absent or the check cannot be run (caller may still try schematool).
+function hiveSysSchemaPresent(){
+   local namespace="$1"
+   local meta_db="$2"
+   local count=""
+
+   case "${meta_db}" in
+      mysql)
+         kubectl get pod mysql-0 -n "${namespace}" >/dev/null 2>&1 || return 1
+         count="$(kubectl exec mysql-0 -n "${namespace}" -- \
+            sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM hive.DBS WHERE LOWER(NAME)='"'"'sys'"'"'"' 2>/dev/null)" || return 1
+         count="${count//[[:space:]]/}"
+         [ -n "${count}" ] && [ "${count}" -ge 1 ]
+         ;;
+      derby)
+         kubectl get pod hive-0 -n "${namespace}" >/dev/null 2>&1 || return 1
+         kubectl exec hive-0 -n "${namespace}" -c hiveserver2 -- \
+            bash -c 'test -d /opt/hive/data/warehouse/sys.db || test -d /opt/hive/data/warehouse/SYS.db'
+         ;;
+      *)
+         return 1
+         ;;
+   esac
+}
+# Run schematool -initSchema -dbType hive on one Ready HS2 pod. Retries while ZK/Kerberos JDBC comes up.
+function hiveSysSchemaInitOnPod(){
+   local namespace="$1"
+   local pod="$2"
+   local meta_db="$3"
+   local kerberos="$4"
+   shift 4
+   local attempt=1
+   local max_attempts="${HIVECTL_HIVE_SYS_SCHEMA_ATTEMPTS:-6}"
+   local delay="${HIVECTL_HIVE_SYS_SCHEMA_RETRY_SEC:-10}"
+   local log=""
+   local status=0
+   local remote=""
+
+   remote="$(cat <<'EOS'
+set -eu
+url="${BEELINE_URL:-}"
+if [ -z "${url}" ]; then
+  echo "BEELINE_URL is empty on this HiveServer2 pod" >&2
+  exit 1
+fi
+cat > /tmp/hive-sys-schema-init.sh << 'EOF'
+#!/bin/bash
+set -eu
+if [ "${HIVE_SYS_KERBEROS:-0}" = "1" ]; then
+  fqdn="$(hostname -f)"
+  realm="${KRB5_REALM:-SECURE.LAB}"
+  [ -f /home/hive/host-service.keytab ] || { echo "missing /home/hive/host-service.keytab" >&2; exit 1; }
+  kinit -kt /home/hive/host-service.keytab "hive/${fqdn}@${realm}"
+fi
+url="${BEELINE_URL:?BEELINE_URL is empty}"
+# HS2 startup renames hive-beeline-*-standalone.jar so Jetty will not unpack it.
+# The fat jar Main-Class is BeeLine, so hadoop jar must not use it as the job jar.
+# HiveSchemaTool is only inside it: put it on HADOOP_CLASSPATH and let schematool
+# launch via hive-cli (no Main-Class), which honors the HiveSchemaTool class name.
+export USE_DEPRECATED_CLI=true
+shopt -s nullglob
+off_jars=("${HIVE_HOME:-/opt/hive}/lib"/hive-beeline-*-standalone.jar.off-hs2-webui)
+if [ "${#off_jars[@]}" -gt 0 ]; then
+  export HADOOP_CLASSPATH="${off_jars[0]}${HADOOP_CLASSPATH:+:${HADOOP_CLASSPATH}}"
+fi
+schematool="${HIVE_HOME:-/opt/hive}/bin/schematool"
+quoted_url="$(printf '%q' "${url}")"
+if command -v script >/dev/null 2>&1; then
+  # kubectl exec has no pty; HiveSchemaTool still initializes JLine.
+  script -q -e -c "${schematool} -initSchema -dbType hive -metaDbType ${HIVE_SYS_META_DB:?} -url ${quoted_url}" /dev/null
+else
+  "${schematool}" -initSchema -dbType hive -metaDbType "${HIVE_SYS_META_DB:?}" -url "${url}"
+fi
+EOF
+chmod 755 /tmp/hive-sys-schema-init.sh
+chown hive:hive /tmp/hive-sys-schema-init.sh
+su -s /bin/bash hive -c "BEELINE_URL=$(printf '%q' "${url}") HIVE_HOME=$(printf '%q' "${HIVE_HOME:-/opt/hive}") HIVE_SYS_META_DB=$(printf '%q' "${HIVE_SYS_META_DB}") HIVE_SYS_KERBEROS=$(printf '%q' "${HIVE_SYS_KERBEROS:-0}") KRB5_REALM=$(printf '%q' "${KRB5_REALM:-SECURE.LAB}") /tmp/hive-sys-schema-init.sh"
+EOS
+)"
+
+   while [ "${attempt}" -le "${max_attempts}" ]; do
+      log="$(kubectl exec -n "${namespace}" "${pod}" "$@" -- \
+         env HIVE_SYS_META_DB="${meta_db}" HIVE_SYS_KERBEROS="${kerberos}" \
+         bash -c "${remote}" 2>&1)" && status=0 || status=$?
+      printf '%s\n' "${log}"
+      if [ "${status}" -eq 0 ]; then
+         return 0
+      fi
+      if hiveSysSchemaAlreadyInitialized "${log}"; then
+         return 0
+      fi
+      if hiveSysSchemaPresent "${namespace}" "${meta_db}"; then
+         echo "Hive SYS schema is present in the metastore (${namespace}); treating init as done"
+         return 0
+      fi
+      if [ "${attempt}" -ge "${max_attempts}" ]; then
+         echo "Hive SYS schema init failed after ${max_attempts} attempts on ${namespace}/${pod}" >&2
+         return 1
+      fi
+      echo "Hive SYS schema init attempt ${attempt}/${max_attempts} failed on ${namespace}/${pod}; retrying in ${delay}s (HiveServer2 JDBC may still be registering)"
+      attempt=$((attempt + 1))
+      sleep "${delay}"
+   done
+   return 1
+}
+# Initialize the Hive SYS schema once HiveServer2 is Ready. Idempotent when sys already exists.
+function ensureHiveSysSchema(){
+   local namespace="$1"
+   local meta_db="mysql"
+   local pod=""
+   local kerberos=0
+   local container_args=()
+
+   if hiveSysSchemaDisabled; then
+      echo "Hive SYS schema init disabled (HIVECTL_HIVE_SYS_SCHEMA=${HIVECTL_HIVE_SYS_SCHEMA})"
+      return 0
+   fi
+
+   case "${namespace}" in
+      standalone)
+         meta_db="derby"
+         pod="hive-0"
+         container_args=(-c hiveserver2)
+         ;;
+      mini|llap|secure)
+         meta_db="mysql"
+         pod="hiveserver2-0"
+         [ "${namespace}" = "secure" ] && kerberos=1
+         ;;
+      *)
+         return 0
+         ;;
+   esac
+
+   if hiveSysSchemaPresent "${namespace}" "${meta_db}"; then
+      echo "Hive SYS schema already initialized (${namespace}); skipping schematool -initSchema"
+      return 0
+   fi
+
+   echo "Initializing Hive SYS schema on ${namespace}/${pod} (metaDbType=${meta_db}, JDBC URL from pod BEELINE_URL) ..."
+   hiveSysSchemaInitOnPod "${namespace}" "${pod}" "${meta_db}" "${kerberos}" "${container_args[@]}"
 }
 function rangerPortForwardPidFile(){
    local namespace="${1:-secure}"
