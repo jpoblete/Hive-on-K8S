@@ -286,4 +286,8 @@
          <name>tez.am.staging-scratch-data.auto-delete</name>
          <value>false</value>
       </property>
+      <property>
+         <name>hive.compactor.worker.threads</name>
+         <value>5</value>
+      </property>
 </configuration>

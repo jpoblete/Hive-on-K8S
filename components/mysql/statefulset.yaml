@@ -57,6 +57,9 @@ spec:
         volumeMounts:
         - name: hive-setup
           mountPath: /docker-entrypoint-initdb.d/
+        - name: mysql-config
+          mountPath: /etc/mysql/conf.d
+          readOnly: true
         - name: mysql
           mountPath: /var/lib/mysql  
         resources:
@@ -71,6 +74,12 @@ spec:
         configMap:
           name: mysql  
           defaultMode: 0777
+      - name: mysql-config
+        configMap:
+          name: mysql
+          items:
+            - key: custom.cnf
+              path: custom.cnf
   volumeClaimTemplates:
   - metadata:
       name: mysql

@@ -181,4 +181,40 @@
          <name>hive.llap.daemon.yarn.shuffle.port</name>
          <value>15551</value>
       </property>
+      <property>
+         <name>metastore.housekeeping.threads.on</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>metastore.housekeeping.leader.hostname</name>
+         <value>hivemetastore-0.hivemetastore-headless.llap.svc.cluster.local</value>
+      </property>
+      <property>
+         <name>metastore.housekeeping.leader.election</name>
+         <value>host</value>
+      </property>
+      <property>
+         <name>metastore.compactor.initiator.on</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>metastore.compactor.cleaner.on</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>metastore.compactor.worker.threads</name>
+         <value>0</value>
+      </property>
+      <property>
+         <name>hive.compactor.cleaner.threads.num</name>
+         <value>5</value>
+      </property>
+      <property>
+         <name>hive.support.concurrency</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.txn.manager</name>
+         <value>org.apache.hadoop.hive.ql.lockmgr.DbTxnManager</value>
+      </property>
 </configuration>
