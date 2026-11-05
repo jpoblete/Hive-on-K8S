@@ -39,7 +39,7 @@ function help(){
    echo "        hiveCtl restore <overlay> <backup-dir>"
    echo "  secure backup also writes mysql-ranger.sql when Ranger Admin has been started (policy DB)."
    echo "        hiveCtl cleanup <overlay>"
-   echo "        hiveCtl disk   (check Kind node /var space; prune container images if low)"
+   echo "        hiveCtl disk   (delete HDFS query logs, then prune container images if /var is low)"
    echo "        hiveCtl resync-keytabs <overlay>   (secure: refresh Secret kerberos-keytabs from KDC PVC)"
    echo "        hiveCtl list passwd [<overlay>]    (password aliases; with overlay, keys present in hive-credentials)"
    echo "        hiveCtl get passwd <overlay> <alias>   (print one password from hive-credentials)"
@@ -2154,18 +2154,75 @@ function ensureDeployPrerequisitesOnce(){
    ensureClusterDiskSpaceOnce
    ensureHiveLocalPathStorageClassOnce || return 1
 }
+# Delete every synced query log on HDFS (/user/hive/logs) and the local caches that would upload them again.
+function pruneHdfsQueryLogs(){
+   local namespace=""
+   local pod=""
+   local hive_pod=""
+
+   for namespace in llap secure mini; do
+      kubectl get namespace "${namespace}" >/dev/null 2>&1 || continue
+      pod="$(hdfsBackupPod "${namespace}")"
+      if ! kubectl get pod "${pod}" -n "${namespace}" >/dev/null 2>&1; then
+         echo "hiveCtl: ${namespace} has no ${pod}; skipping HDFS log prune"
+         continue
+      fi
+      echo "hiveCtl: deleting /user/hive/logs in ${namespace} ..."
+      if [ "${namespace}" = "secure" ]; then
+         kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
+            realm="${KRB5_REALM:-SECURE.LAB}"
+            host="$(hostname -f)"
+            sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/${host}@${realm}" || exit 1
+            err="$(hdfs dfs -test -e /user/hive/logs 2>&1)" || {
+               if printf "%s" "${err}" | grep -q "Connection refused\\|Could not connect\\|StandbyException"; then
+                  printf "%s\n" "${err}" >&2
+                  exit 1
+               fi
+               echo "no /user/hive/logs"
+               exit 0
+            }
+            hdfs dfs -rm -r -skipTrash /user/hive/logs
+         ' || echo "hiveCtl: HDFS log prune failed in ${namespace}" >&2
+      else
+         kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
+            err="$(hdfs dfs -test -e /user/hive/logs 2>&1)" || {
+               if printf "%s" "${err}" | grep -q "Connection refused\\|Could not connect\\|StandbyException"; then
+                  printf "%s\n" "${err}" >&2
+                  exit 1
+               fi
+               echo "no /user/hive/logs"
+               exit 0
+            }
+            hdfs dfs -rm -r -skipTrash /user/hive/logs
+         ' || echo "hiveCtl: HDFS log prune failed in ${namespace}" >&2
+      fi
+      while read -r hive_pod; do
+         [ -n "${hive_pod}" ] || continue
+         kubectl exec "${hive_pod}" -n "${namespace}" -- bash -lc 'rm -rf /opt/hive/log/tez /opt/hive/log/llap' >/dev/null 2>&1 || true
+      done < <(kubectl get pods -n "${namespace}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep -E '^(hiveserver2-|llapdaemon-|hivemetastore-)' || true)
+   done
+}
 function showClusterDisk(){
    local node=""
    local any=0
 
    command -v docker >/dev/null 2>&1 || { echo "docker not available"; return 1; }
    kubectl get nodes >/dev/null 2>&1 || { echo "kubectl cluster not reachable"; return 1; }
+   echo "hiveCtl: Kind node disk before HDFS log prune"
    while read -r node; do
       [ -n "${node}" ] || continue
       docker inspect "${node}" >/dev/null 2>&1 || continue
       reportKindNodeDisk "${node}" && any=1
    done < <(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
    [ "${any}" -eq 1 ] || echo "No Kind node containers matched cluster node names"
+   pruneHdfsQueryLogs
+   echo "hiveCtl: Kind node disk after HDFS log prune"
+   any=0
+   while read -r node; do
+      [ -n "${node}" ] || continue
+      docker inspect "${node}" >/dev/null 2>&1 || continue
+      reportKindNodeDisk "${node}" && any=1
+   done < <(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
    ensureClusterDiskSpace
 }
 # Start all components in dependency order.
@@ -2578,10 +2635,32 @@ function hdfsArchiveForBackup(){
          sudo -u hadoop kinit -kt /home/hadoop/host-service.keytab "hdfs/${host}@${realm}" || exit 1
          rm -rf /tmp/hdfs-backup /tmp/hdfs-backup.tgz
          mkdir -p /tmp/hdfs-backup
-         for path in /opt /tmp /user /users /warehouse; do
-            if hdfs dfs -test -e "${path}"; then
+         copy_hdfs_path() {
+            local path="$1" child name hive_child hive_name
+            hdfs dfs -test -e "${path}" || return 0
+            if [ "${path}" != "/user" ]; then
                hdfs dfs -get "${path}" /tmp/hdfs-backup/
+               return 0
             fi
+            mkdir -p /tmp/hdfs-backup/user
+            while IFS= read -r child; do
+               [ -n "${child}" ] || continue
+               name="${child##*/}"
+               if [ "${name}" != "hive" ]; then
+                  hdfs dfs -get "${child}" /tmp/hdfs-backup/user/
+                  continue
+               fi
+               mkdir -p /tmp/hdfs-backup/user/hive
+               while IFS= read -r hive_child; do
+                  [ -n "${hive_child}" ] || continue
+                  hive_name="${hive_child##*/}"
+                  [ "${hive_name}" = "logs" ] && continue
+                  hdfs dfs -get "${hive_child}" /tmp/hdfs-backup/user/hive/
+               done < <(hdfs dfs -ls /user/hive 2>/dev/null | awk "NR>1 {print \$NF}")
+            done < <(hdfs dfs -ls /user 2>/dev/null | awk "NR>1 {print \$NF}")
+         }
+         for path in /opt /tmp /user /users /warehouse; do
+            copy_hdfs_path "${path}"
          done
          tar -C /tmp -czf /tmp/hdfs-backup.tgz hdfs-backup
       '
@@ -2590,10 +2669,32 @@ function hdfsArchiveForBackup(){
       kubectl exec "${pod}" -n "${namespace}" -- bash -lc '
          rm -rf /tmp/hdfs-backup /tmp/hdfs-backup.tgz
          mkdir -p /tmp/hdfs-backup
-         for path in /opt /tmp /user /users /warehouse; do
-            if hdfs dfs -test -e "${path}"; then
+         copy_hdfs_path() {
+            local path="$1" child name hive_child hive_name
+            hdfs dfs -test -e "${path}" || return 0
+            if [ "${path}" != "/user" ]; then
                hdfs dfs -get "${path}" /tmp/hdfs-backup/
+               return 0
             fi
+            mkdir -p /tmp/hdfs-backup/user
+            while IFS= read -r child; do
+               [ -n "${child}" ] || continue
+               name="${child##*/}"
+               if [ "${name}" != "hive" ]; then
+                  hdfs dfs -get "${child}" /tmp/hdfs-backup/user/
+                  continue
+               fi
+               mkdir -p /tmp/hdfs-backup/user/hive
+               while IFS= read -r hive_child; do
+                  [ -n "${hive_child}" ] || continue
+                  hive_name="${hive_child##*/}"
+                  [ "${hive_name}" = "logs" ] && continue
+                  hdfs dfs -get "${hive_child}" /tmp/hdfs-backup/user/hive/
+               done < <(hdfs dfs -ls /user/hive 2>/dev/null | awk "NR>1 {print \$NF}")
+            done < <(hdfs dfs -ls /user 2>/dev/null | awk "NR>1 {print \$NF}")
+         }
+         for path in /opt /tmp /user /users /warehouse; do
+            copy_hdfs_path "${path}"
          done
          tar -C /tmp -czf /tmp/hdfs-backup.tgz hdfs-backup
       '
