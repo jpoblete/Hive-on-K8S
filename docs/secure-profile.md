@@ -18,6 +18,12 @@ For day-to-day commands, see [README.md](../README.md) (profiles, `hiveCtl`, smo
 
 Stack order: **`krb5kdc → hadoop-namenode (+ 3× datanode) → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue`**.
 
+### ACID tables and compaction
+
+The **`llap`** profile sets **`hive.support.concurrency=true`** and **`hive.txn.manager=org.apache.hadoop.hive.ql.lockmgr.DbTxnManager`** in both HMS and HS2 `hive-site.xml`. The **`secure`** overlay uses the same compactor-related keys; **`concurrency` + `DbTxnManager`** must be present there too or Beeline logs *Concurrency mode is disabled* and **`SHOW COMPACTIONS`** stays empty while transactional features are effectively off.
+
+After deploying the fix: restart **`hivemetastore`** and **`hiveserver2`** so pods reload `hive-site.xml`. Then expect initiator/cleaner threads on the HMS side (**`metastore.compactor.*`**) and compactor **worker** threads on HS2 (**`hive.compactor.worker.threads`**).
+
 **Hive SYS schema:** After HiveServer2 is Ready, `hiveCtl` runs this once on **`hiveserver2-0`** as user **`hive`** (same `BEELINE_URL` as the pod; `kinit` uses `hive/$(hostname -f)@SECURE.LAB` and `/home/hive/host-service.keytab`):
 
 ```bash

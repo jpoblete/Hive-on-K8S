@@ -290,4 +290,13 @@
          <name>hive.compactor.worker.threads</name>
          <value>5</value>
       </property>
+      <!-- Required for ACID tables and for compactor initiator/worker/cleaner to be active (matches llap profile). -->
+      <property>
+         <name>hive.support.concurrency</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.txn.manager</name>
+         <value>org.apache.hadoop.hive.ql.lockmgr.DbTxnManager</value>
+      </property>
 </configuration>

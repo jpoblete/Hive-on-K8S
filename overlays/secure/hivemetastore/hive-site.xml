@@ -236,4 +236,13 @@
          <name>hive.compactor.cleaner.threads.num</name>
          <value>5</value>
       </property>
+      <!-- Same as llap profile: ACID + compactor require DbTxnManager and concurrency in HMS/HS2 configs. -->
+      <property>
+         <name>hive.support.concurrency</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.txn.manager</name>
+         <value>org.apache.hadoop.hive.ql.lockmgr.DbTxnManager</value>
+      </property>
 </configuration>
