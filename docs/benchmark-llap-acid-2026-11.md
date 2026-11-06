@@ -1,10 +1,12 @@
 # Apache Hive LLAP & ACID Performance Benchmark Report
 
-**Environment:** Secure Hive-on-K8S infrastructure (Kerberos enabled)  
-**Author:** José Manuel Martínez Poblete  
-**Date:** November 6, 2026
+| | |
+| --- | --- |
+| **Environment** | Secure Hive-on-K8S (Kerberos enabled) |
+| **Author** | José Manuel Martínez Poblete |
+| **Date** | November 6, 2026 |
 
-This is the project’s **reference performance report** for Hive-on-Kubernetes: LLAP behaviour, partition pruning, a heavy window/cross-join spill case, and managed ACID mutations. The [README](../README.md) links here prominently under **Performance**.
+This is the project’s **reference performance report** for Hive-on-Kubernetes: LLAP behaviour, partition pruning, a heavy window/cross-join spill case, and managed ACID mutations. The [README](../README.md) links here under **Performance**.
 
 For stack details and commands, see [README.md](../README.md) and [Secure profile](secure-profile.md).
 
@@ -12,33 +14,31 @@ For stack details and commands, see [README.md](../README.md) and [Secure profil
 
 ## 1. Executive summary
 
-This report summarizes the performance benchmarking methodology and results executed on a secure, containerized **Apache Hive 4.3.0-SNAPSHOT** architecture deployed on Kubernetes (e.g. kind control-plane port mappings and worker-backed nodes on a real cluster).
+This report summarizes methodology and results for a secure, containerized **Apache Hive 4.3.0-SNAPSHOT** deployment on Kubernetes (e.g. kind with port mappings and worker nodes on a real cluster).
 
-The primary goal of this benchmark suite was to isolate, stress-test, and profile two core engines in the data architecture:
+Goals:
 
-1. **Low-latency analytical processing (LLAP)** — in-memory caching efficiency, vectorization pipelines, and boundary behaviour of Tez execution daemons under heavy analytical window workloads.
-2. **ACID transaction manager (`DbTxnManager`)** — performance of row-level data mutations (INSERT, UPDATE, DELETE) and read behaviour across transaction deltas.
+1. **Low-latency analytical processing (LLAP)** — cache efficiency, vectorization, and Tez/LLAP behaviour under heavy analytical window workloads.
+2. **ACID (`DbTxnManager`)** — INSERT / UPDATE / DELETE / SELECT performance and reads across transaction deltas.
 
-The cluster demonstrated sub-second execution for optimized analytical queries, efficient partition pruning, and resilient disk-spill behaviour under synthetic memory pressure.
+Observed: sub-second DAG times for tuned analytical queries, strong partition pruning, and graceful disk spill under synthetic memory pressure without pod failure.
 
 ---
 
 ## 2. Benchmark methodology
 
-To reduce skew from cached query results, queries used non-deterministic constructs (e.g. `RAND()`) or distinct combinations of string operations so work was evaluated at query time.
+To limit skew from cached results, queries used non-deterministic constructs (e.g. `RAND()`) or distinct string-heavy expressions so work was computed at query time.
 
 ### Core test dataset
 
 | Item | Value |
-|------|--------|
+| --- | --- |
 | Tables | `default.ice_orc_ext_3_1_10k` (external), `default.ice_orc_acid` (managed ACID) |
 | Row count | 10,000 baseline rows |
 | Format | ORC (vectorized) |
 | Partitioning | Column `p1` |
 
 ### Execution configuration (ACID tests)
-
-Session-level settings for transactional isolation:
 
 ```sql
 SET hive.support.concurrency=true;
@@ -47,13 +47,11 @@ SET hive.txn.manager=org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
 
 ---
 
-## 3. Test phase 1: Analytical & LLAP processing
-
-This phase probed Tez DAG container memory behaviour and optimization boundaries.
+## 3. Test phase 1: Analytical and LLAP processing
 
 ### A. Synthetic memory exhaustion (cross-join multiplier)
 
-A cross-join joined the full baseline table to itself on partition key `p1`, scaling the intermediate matrix to **1,000,000** rows.
+Full table self-join on `p1` → **1,000,000** intermediate rows.
 
 ```sql
 WITH stream_a AS (
@@ -71,15 +69,17 @@ JOIN stream_b b ON a.p1 = b.p1;
 ```
 
 | Metric | Value |
-|--------|--------|
-| Result | **143.61 s** |
-| Notes | Heavy reducer phase (~136.60 s on Reducer 4) tied to a wide analytic window (`ROWS BETWEEN 500 PRECEDING`), JVM sort buffers spilling ~**177.22 MB** to local scratch without pod failure; **14** parallel containers across **2** workers |
+| --- | --- |
+| Wall / total | **143.61 s** |
+| Tez / reducers | Heavy reducer phase (~136.60 s on Reducer 4) with wide analytic window (`ROWS BETWEEN 500 PRECEDING`) |
+| Spill | ~**177.22 MB** to local scratch (`FILE_BYTES_WRITTEN`); no pod crash |
+| Parallelism | **14** containers across **2** workers |
 
-### B. Bounded & vectorized dashboard benchmarks
+### B. Bounded and vectorized dashboard benchmarks
 
-Run interactively in a TTY-attached session to avoid JLine non-TTY limitations.
+Run in a TTY-attached session (avoids JLine non-TTY issues).
 
-**Test 1A & 1B — cache warm vs hit**
+**Test 1 — cache warm vs hit**
 
 ```sql
 SELECT p1, COUNT(1), COUNT(DISTINCT c2), AVG(c1)
@@ -88,11 +88,11 @@ GROUP BY p1;
 ```
 
 | Run | DAG runtime |
-|-----|----------------|
+| --- | --- |
 | Warmer | **0.56 s** |
 | Hit | **0.58 s** |
 
-Analysis: LLAP reported **META_HIT** / **DATA_HIT** with **0 B** read from HDFS in the hit path.
+LLAP path: **META_HIT** / **DATA_HIT**, **0 B** read from HDFS on the hit run.
 
 **Test 2 — partition pruning**
 
@@ -105,7 +105,7 @@ LIMIT 50;
 ```
 
 | Metric | Value |
-|--------|--------|
+| --- | --- |
 | DAG runtime | **0.11 s** |
 
 **Test 3 — heavy vectorized strings**
@@ -120,37 +120,37 @@ GROUP BY p1;
 ```
 
 | Metric | Value |
-|--------|--------|
+| --- | --- |
 | DAG runtime | **0.72 s** |
 
 ---
 
 ## 4. Test phase 2: Managed ACID scaling
 
-After creating a transactional table (`TBLPROPERTIES ('transactional'='true')`), structural mutations were measured.
+Transactional table: `TBLPROPERTIES ('transactional'='true')`.
 
-| Step | Description | DAG / wall-clock | Rows |
-|------|-------------|------------------|------|
-| Hydrate ACID table from source | INSERT … SELECT | DAG **3.41 s**; **8.848 s** total · **10,000** rows | |
-| ACID test 1 | Row **DELETE** | DAG **4.81 s**; **9.486 s** total · **1,000** rows | |
-| ACID test 2 | **UPDATE** (partition-pruned predicate) | DAG **0.07 s**; **0.567 s** total · **0** rows affected | |
-| ACID test 3 | **SELECT** across deltas | DAG **1.80 s**; **2.391 s** total · **100** rows | |
+| Step | Operation | DAG time | Client / wall | Rows |
+| --- | --- | --- | --- | --- |
+| Hydrate | `INSERT … SELECT` into ACID table | 3.41 s | 8.848 s | 10,000 |
+| ACID 1 | `DELETE` (row removal) | 4.81 s | 9.486 s | 1,000 |
+| ACID 2 | `UPDATE` (partition-pruned predicate) | 0.07 s | 0.567 s | 0 |
+| ACID 3 | `SELECT` across deltas | 1.80 s | 2.391 s | 100 |
 
-### Transactional mechanics (observed behaviour)
+### Transactional mechanics (observed)
 
-1. **Deletion cost (~4.81 s DAG)** — `DELETE WHERE c1 % 10 = 0` scanned broadly; Hive wrote **delete_delta** structures rather than rewriting base ORC files wholesale.
-2. **Update path (~0.07 s DAG)** — `UPDATE` filtered to a single partition (`WHERE p1 = 1`), so pruning limited work; transactional delta metadata updated quickly.
-3. **Delta merge read (~1.80 s DAG)** — aggregation had to reconcile base ORC stripes with active delete deltas in the LLAP/Tez path.
+1. **Deletion (~4.81 s DAG)** — `DELETE WHERE c1 % 10 = 0` scanned broadly; Hive recorded **delete_delta** metadata instead of rewriting base ORC wholesale.
+2. **Update (~0.07 s DAG)** — predicate targeted a single partition (`WHERE p1 = 1`); pruning limited work.
+3. **Delta read (~1.80 s DAG)** — aggregation reconciled base ORC with active delete deltas via LLAP/Tez.
 
 ---
 
 ## 5. Summary
 
-These runs support that the **secure** Hive-on-K8S stack behaves sensibly for LLAP cache hits, partition pruning, controlled ACID mutations, and spill under extreme windowed joins. Kerberos and metadata handshakes did not dominate these timings.
+The **secure** Hive-on-K8S stack showed sensible LLAP cache hits, partition pruning, ACID mutations, and controlled spill under an extreme windowed join. Kerberos did not dominate these timings.
 
-**Operational note:** Analytic windows with very large frame sizes can force sort spills and long reducer phases—keep window history bounds tight for predictable in-memory behaviour.
+**Operational note:** Very large analytic window frames can force sort spills and long reducer phases; keep window history bounds modest for predictable behaviour.
 
 ### Possible follow-ups
 
-- Automated load: e.g. **1,000,000** rows into the ACID table to stress compaction.
-- Concurrent transactions: parallel UPDATE/DELETE sessions to observe lock behaviour and contention.
+- Load **~1,000,000** rows into the ACID table to stress compaction.
+- Parallel UPDATE/DELETE sessions to observe lock behaviour under contention.

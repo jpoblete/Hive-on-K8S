@@ -24,7 +24,13 @@ The manifests intentionally complete the images at pod startup by installing sma
 
 ## Performance: LLAP, ACID, and a real cluster
 
-This stack has been **benchmarked end-to-end** on Kubernetes with **Kerberos** (`secure`): LLAP cache hits and partition pruning at **sub-second** DAG times, managed **ACID** INSERT/DELETE/UPDATE/SELECT on 10k-row ORC tables, and a deliberate cross-join / window workload that spills to disk without pod failure. Methodology, SQL, and timings are in **[docs/benchmark-llap-acid-2026-11.md](docs/benchmark-llap-acid-2026-11.md)** (November 2026).
+End-to-end **benchmarks** on Kubernetes with **Kerberos** (`secure` profile):
+
+- **LLAP:** Sub-second DAG times for tuned aggregations; partition pruning ~**0.11 s**; cache warm/hit runs ~**0.56–0.58 s**.
+- **ACID:** Managed table mutations (INSERT / DELETE / UPDATE / SELECT across deltas) on **10k**-row ORC baselines.
+- **Stress:** Cross-join + window workload spills ~**177 MB** to scratch without pod failure (~**144 s**).
+
+Full methodology, SQL, and tables: **[docs/benchmark-llap-acid-2026-11.md](docs/benchmark-llap-acid-2026-11.md)** (November 2026).
 
 ## Contents
 
