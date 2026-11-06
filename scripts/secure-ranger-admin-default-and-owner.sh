@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Usage Notice: This project is not meant for commercial use without permission and proper credit.
 # Author: j.martinez.poblete@gmail.com
-# Ranger lab: admin gets all Hive privileges on database "default" (+ tables/columns) and on any
-# resource via existing {OWNER} policy rows (databases/tables/UDFs admin creates).
+# Ranger lab: Kerberos admin/admin is a Hive superuser (every global * policy), and {OWNER}
+# rows stay so creators keep access to objects they own.
 set -euo pipefail
 NS="${1:-secure}"
 kubectl exec -n "${NS}" ranger-0 -c ranger -- python3 -c '
@@ -50,8 +50,37 @@ def resource_is_global_star(resources):
     return False
 
 
+def ensure_admin_superuser(policy):
+    items = policy.setdefault("policyItems", [])
+    target = None
+    for item in items:
+        users = item.get("users") or []
+        if "{OWNER}" in users:
+            continue
+        if "admin" in users:
+            target = item
+            break
+        if "hive" in users and target is None:
+            target = item
+    if target is None:
+        items.append({"users": ["admin"], "accesses": ALL_ACCESSES, "delegateAdmin": True})
+        return True
+    changed = False
+    users = list(target.get("users") or [])
+    if "admin" not in users:
+        target["users"] = users + ["admin"]
+        changed = True
+    if target.get("accesses") != ALL_ACCESSES:
+        target["accesses"] = ALL_ACCESSES
+        changed = True
+    if not target.get("delegateAdmin"):
+        target["delegateAdmin"] = True
+        changed = True
+    return changed
+
+
 policies = req("GET", "/service/secure_hive/policy")
-removed = 0
+admin_global = 0
 default_updated = False
 owner_rows = 0
 
@@ -60,14 +89,10 @@ for p in policies:
     resources = p.get("resources") or {}
     name = p.get("name") or ""
 
-    # Drop admin from global (*) policies; hive + {OWNER} rows stay.
-    if resource_is_global_star(resources):
-        for item in p.get("policyItems", []):
-            users = item.get("users") or []
-            if "admin" in users and "{OWNER}" not in users:
-                item["users"] = [u for u in users if u != "admin"]
-                changed = True
-                removed += 1
+    # admin/admin@SECURE.LAB is the lab superuser on every global (*) policy.
+    if resource_is_global_star(resources) and ensure_admin_superuser(p):
+        changed = True
+        admin_global += 1
 
     # default DB: database=default, table/column=* — full access for admin.
     db_vals = (resources.get("database") or {}).get("values") or []
@@ -103,7 +128,7 @@ for p in policies:
         except RuntimeError as err:
             print("policy_update_skipped:", p.get("name"), err, file=sys.stderr)
 
-print("removed_admin_from_global_policy_items:", removed)
+print("admin_global_policies_updated:", admin_global)
 print("default_db_admin_policy_updated:", default_updated)
 print("owner_policy_rows_seen:", owner_rows)
 '

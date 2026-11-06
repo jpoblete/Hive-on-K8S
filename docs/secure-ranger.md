@@ -141,7 +141,7 @@ With **`HIVECTL_SECURE_RANGER_HS2=1`**, **`hiveCtl`** runs **`scripts/secure-ran
 
 Plugin REST URL: **`http://ranger.secure.svc.cluster.local:6080`**. Service name **`secure_hive`**.
 
-6. Smoke: deny/allow via Beeline with Kerberos. Lab **`admin`** (`admin/admin@SECURE.LAB`) should have **all** privileges on **`default`** and on databases/tables/UDFs **they own** (`{OWNER}` rows), not on every database. Wait ~30s for HS2 policy poll or restart HS2 after bootstrap.
+6. Smoke: deny/allow via Beeline with Kerberos. Lab **`admin`** (`admin/admin@SECURE.LAB`) is a Hive superuser (global `*` policies, including **`sys`**). `{OWNER}` rows still grant creators access to objects they own. Wait ~30s for HS2 policy poll or restart HS2 after bootstrap.
 
 **LLAP:** Enforcement stays on the **HS2** session path; no separate LLAP daemon plugin in most deployments.
 
