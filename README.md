@@ -30,6 +30,7 @@ Read **Profiles** in order (simplest first). UIs and kind setup are grouped unde
 - [Prerequisites](#prerequisites) · [Hardware](#hardware-requirements)
 - [**Profiles**](#profiles) — `standalone` → `mini` → `llap` → `secure`
 - [**Secure profile (detailed)**](docs/secure-profile.md) — Kerberos ZK, Tez jar cache, disk, smoke tests
+- [**LLAP & ACID benchmark (Nov 2026, real cluster)**](docs/benchmark-llap-acid-2026-11.md) — methodology, queries, timings
 - [Browser UIs & kind (all Hue profiles)](#browser-uis-and-kind-llap--secure)
 - [Data safety](#data-safety) · [Bootstrap model](#bootstrap-model) · [Lab OS users](#lab-os-users-supergroup)
 - [Smoke tests](#smoke-tests) · [Validation](#validation)
