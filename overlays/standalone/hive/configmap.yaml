@@ -127,7 +127,7 @@ data:
     export HIVE_CONF_DIR=/opt/hive/conf
     export HADOOP_HOME=/opt/hadoop
     export HADOOP_CONF_DIR=/opt/hive/conf
-    export PATH=${PATH}:/opt/hive/conf:/opt/hive/bin:/opt/hadoop/bin:.
+    export PATH="${JAVA_HOME}/bin:${PATH}:/opt/hive/conf:/opt/hive/bin:/opt/hadoop/bin:."
     export BEELINE_URL="jdbc:hive2://hiveserver2.standalone.svc.cluster.local:10000/default"
     export BEELINE_USER="${BEELINE_USER:-hive}"
     if [ -f ~/.beeline.env ]; then

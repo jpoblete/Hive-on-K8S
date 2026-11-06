@@ -257,7 +257,7 @@ data:
     export HIVE_HOME=/opt/hive
     export HIVE_CONF_DIR=/opt/hive/conf
     export HADOOP_CONF_DIR=/opt/hive/conf
-    export PATH=${PATH}:/opt/hive/conf:/opt/hive/bin:/opt/hadoop/bin:.
+    export PATH="${JAVA_HOME}/bin:${PATH}:/opt/hive/conf:/opt/hive/bin:/opt/hadoop/bin:."
     BEELINE_URL="jdbc:hive2://$(hostname -f):10000/default"
     export BEELINE_URL
     export BEELINE_USER="${BEELINE_USER:-hive}"
@@ -675,10 +675,33 @@ data:
           if [ -f "${beeline_sh}" ] && grep -F -q 'beelineJarPath=`ls ${HIVE_LIB}/hive-beeline-*.jar`' "${beeline_sh}"; then
              sed -i 's#beelineJarPath=`ls ${HIVE_LIB}/hive-beeline-\*\.jar`#beelineJarPath=`ls ${HIVE_LIB}/hive-beeline-*.jar.off-hs2-webui 2>/dev/null | head -1`#' "${beeline_sh}"
           fi
-          # docker/hive-ranger replaces bin/beeline with java -jar. Kerberos tickets are ignored without this flag.
-          if [ -f "${HIVE_HOME}/bin/beeline" ] && grep -q 'beeline-client/hive-beeline' "${HIVE_HOME}/bin/beeline" \
-             && ! grep -q 'useSubjectCredsOnly' "${HIVE_HOME}/bin/beeline"; then
-             sed -i 's|exec java |exec java -Djavax.security.auth.useSubjectCredsOnly=false |' "${HIVE_HOME}/bin/beeline"
+          # docker/hive-ranger: bin/beeline runs java -jar against beeline-client/*. Moving the jar off the HS2
+          # classpath can leave beeline-client empty; copy back from lib/*.off-hs2-webui for the CLI only.
+          if [ -f "${HIVE_HOME}/bin/beeline" ] && grep -q 'beeline-client/hive-beeline' "${HIVE_HOME}/bin/beeline"; then
+             mkdir -p "${HIVE_HOME}/beeline-client"
+             shopt -s nullglob
+             bc=( "${HIVE_HOME}/beeline-client"/hive-beeline-*-standalone.jar )
+             shopt -u nullglob
+             if [ "${#bc[@]}" -eq 0 ]; then
+                shopt -s nullglob
+                for j in "${HIVE_HOME}/lib"/hive-beeline-*-standalone.jar.off-hs2-webui; do
+                   [ -f "${j}" ] || continue
+                   base="${j%.off-hs2-webui}"
+                   cp -a "${j}" "${HIVE_HOME}/beeline-client/$(basename "${base}")"
+                   break
+                done
+                shopt -u nullglob
+             fi
+          fi
+          # docker/hive-ranger: bin/beeline uses bare "java" + -jar. Fix path + Kerberos for non-login shells.
+          if [ -f "${HIVE_HOME}/bin/beeline" ] && grep -q 'beeline-client/hive-beeline' "${HIVE_HOME}/bin/beeline"; then
+             _bj="${JAVA_HOME:-/opt/java/openjdk}/bin/java"
+             if grep -q '^exec java ' "${HIVE_HOME}/bin/beeline"; then
+                sed -i "s|^exec java |exec ${_bj} |" "${HIVE_HOME}/bin/beeline"
+             fi
+             if ! grep -q 'useSubjectCredsOnly' "${HIVE_HOME}/bin/beeline"; then
+                sed -i "s|^exec ${_bj} |exec ${_bj} -Djavax.security.auth.useSubjectCredsOnly=false -Dorg.jline.terminal.type=dumb |" "${HIVE_HOME}/bin/beeline"
+             fi
           fi
        fi
        hive_service_extra=()
