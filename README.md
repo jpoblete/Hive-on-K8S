@@ -22,15 +22,19 @@ This project runs Apache Hive on Kubernetes using upstream/minimal container ima
 
 The manifests intentionally complete the images at pod startup by installing small OS packages and writing runtime configuration from ConfigMaps. Because those images are minimal, the startup scripts use `root` for bootstrap work and then run Hive/Hadoop services as their application users.
 
+## Performance: LLAP, ACID, and a real cluster
+
+This stack has been **benchmarked end-to-end** on Kubernetes with **Kerberos** (`secure`): LLAP cache hits and partition pruning at **sub-second** DAG times, managed **ACID** INSERT/DELETE/UPDATE/SELECT on 10k-row ORC tables, and a deliberate cross-join / window workload that spills to disk without pod failure. Methodology, SQL, and timings are in **[docs/benchmark-llap-acid-2026-11.md](docs/benchmark-llap-acid-2026-11.md)** (November 2026).
+
 ## Contents
 
 Read **Profiles** in order (simplest first). UIs and kind setup are grouped under **[Browser UIs & kind](#browser-uis-and-kind-llap--secure)**.
 
+- [**LLAP & ACID benchmark (Nov 2026)**](docs/benchmark-llap-acid-2026-11.md) — **real-cluster** timings: analytical + transactional workloads
 - [Images by profile](#images-by-profile)
 - [Prerequisites](#prerequisites) · [Hardware](#hardware-requirements)
 - [**Profiles**](#profiles) — `standalone` → `mini` → `llap` → `secure`
 - [**Secure profile (detailed)**](docs/secure-profile.md) — Kerberos ZK, Tez jar cache, disk, smoke tests
-- [**LLAP & ACID benchmark (Nov 2026, real cluster)**](docs/benchmark-llap-acid-2026-11.md) — methodology, queries, timings
 - [Browser UIs & kind (all Hue profiles)](#browser-uis-and-kind-llap--secure)
 - [Data safety](#data-safety) · [Bootstrap model](#bootstrap-model) · [Lab OS users](#lab-os-users-supergroup)
 - [Smoke tests](#smoke-tests) · [Validation](#validation)

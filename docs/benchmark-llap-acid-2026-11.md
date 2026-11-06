@@ -4,6 +4,8 @@
 **Author:** José Manuel Martínez Poblete  
 **Date:** November 6, 2026
 
+This is the project’s **reference performance report** for Hive-on-Kubernetes: LLAP behaviour, partition pruning, a heavy window/cross-join spill case, and managed ACID mutations. The [README](../README.md) links here prominently under **Performance**.
+
 For stack details and commands, see [README.md](../README.md) and [Secure profile](secure-profile.md).
 
 ---
