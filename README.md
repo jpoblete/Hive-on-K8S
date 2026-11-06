@@ -237,6 +237,8 @@ Each profile uses a **different localhost port** so two stacks can stay up witho
 | **`llap`** | **localhost:11200** | **11201** | **http://localhost:11202/** | **31020–31022** |
 | **`secure`** | **localhost:11300** | **11301** | **http://localhost:11302/** | **31030–31032** |
 
+On **`secure`**, optional **NodePort** browser entry points (same ranges as Hue/HS2 on real clusters, or map them in **`kind/llap-cluster.yaml`**): **HDFS NameNode Web UI** **`http://<node-ip>:30970/`** (Service **`hadoop-namenode-ui`**, container port **9870**; **`nameservice`** stays headless for **`hdfs://nameservice:8020`**), **LLAP daemon UI** **`<node-ip>:31502`** (in-cluster **15002**), **Ranger Admin** **`<node-ip>:30680`** (see **`docs/secure-ranger.md`**).
+
 | UI | `hiveCtl` |
 |----|-----------|
 | Hue | Auto **`kubectl port-forward`** per active profile after **`start`** / **`restore`** |

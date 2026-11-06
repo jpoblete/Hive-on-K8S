@@ -44,7 +44,7 @@ function help(){
    echo "        hiveCtl list passwd [<overlay>]    (password aliases; with overlay, keys present in hive-credentials)"
    echo "        hiveCtl get passwd <overlay> <alias>   (print one password from hive-credentials)"
    echo "        hiveCtl get passwd <alias>             (same; overlay defaults to secure, or HIVECTL_PASSWD_OVERLAY)"
-   echo "        hiveCtl status   (active components and ready/total pod counts)"
+   echo "        hiveCtl status   (active components, ready/total pod counts, web UI NodePort when exposed)"
    echo ""
    echo "Hue (standalone|mini|llap|secure): port-forward (standalone=8885, mini=8886, llap=8887, secure=8888)"
    echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
@@ -428,6 +428,68 @@ function overlays(){
    #
    find ./overlays -name kustomization.yaml -type f -print | awk -F/ 'NF >= 4 {print $3"_"$4}' | sort
 }
+# First NodePort in ns whose Service targets container port want_port (9870 = NN UI, 15002 = LLAP web).
+function firstServiceNodePortForTargetPort(){
+   local namespace="$1"
+   local want_port="$2"
+
+   kubectl get svc -n "${namespace}" -o json 2>/dev/null \
+      | python3 -c '
+import json, sys
+want = sys.argv[1]
+data = json.load(sys.stdin)
+for svc in data.get("items", []):
+    for p in (svc.get("spec") or {}).get("ports") or []:
+        tp = p.get("targetPort")
+        if tp is None:
+            continue
+        if str(tp) != str(want):
+            continue
+        np = p.get("nodePort")
+        if np:
+            print(np)
+            sys.exit(0)
+sys.exit(1)
+' "${want_port}" 2>/dev/null || true
+}
+# Optional NodePort for a browser-facing port (Hue, Ranger, HS2 Web UI, LLAP UI, NameNode HDFS UI).
+# Empty when ClusterIP-only, headless, or the Service is missing.
+function overlayWebUiNodePort(){
+   local namespace="$1"
+   local service="$2"
+   local np=""
+
+   case "${service}" in
+      hue)
+         np="$(kubectl get svc hue -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null)"
+         ;;
+      ranger)
+         np="$(kubectl get svc ranger -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null)"
+         ;;
+      hive)
+         # standalone profile: Service hiveserver2 (all-in-one StatefulSet app=hive)
+         np="$(kubectl get svc hiveserver2 -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="webui")].nodePort}' 2>/dev/null)"
+         ;;
+      hiveserver2)
+         # mini|llap|secure: HS2 NodePorts are on Service hiveserver2 (renamed from hivemetastore)
+         np="$(kubectl get svc hiveserver2 -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="webui")].nodePort}' 2>/dev/null)"
+         ;;
+      llapdaemon)
+         np="$(kubectl get svc llapdaemon -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}' 2>/dev/null)"
+         if [ -z "${np}" ]; then
+            np="$(firstServiceNodePortForTargetPort "${namespace}" 15002)"
+         fi
+         ;;
+      hadoop-namenode)
+         # HDFS NameNode UI (9870): dedicated NodePort Service hadoop-namenode-ui (nameservice stays headless for RPC)
+         np="$(kubectl get svc hadoop-namenode-ui -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null)"
+         if [ -z "${np}" ]; then
+            np="$(firstServiceNodePortForTargetPort "${namespace}" 9870)"
+         fi
+         ;;
+   esac
+   printf '%s' "${np}"
+}
 # Human-readable run state for one overlay workload (StatefulSet or Deployment name = service).
 function overlayComponentState(){
    local namespace="$1"
@@ -494,13 +556,17 @@ function activeOverlays(){
 
    if [ -n "${arg}" ]; then
       echo "Active Overlays:"
-      printf "  %-28s %s\n" "COMPONENT" "STATE"
+      printf "  %-28s  %-40s  %s\n" "COMPONENT" "STATE" "WEB UI (NodePort)"
       while IFS= read -r target; do
          [ -n "${target}" ] || continue
          namespace="${target%_*}"
          service="${target#*_}"
          state="$(overlayComponentState "${namespace}" "${service}")" || true
-         printf "  %-28s %s\n" "${target}" "${state:-unknown}"
+         ui_np="$(overlayWebUiNodePort "${namespace}" "${service}")"
+         if [ -z "${ui_np}" ]; then
+            ui_np="-"
+         fi
+         printf "  %-28s  %-40s  %s\n" "${target}" "${state:-unknown}" "${ui_np}"
       done <<< "${active_list}"
       return "${status}"
    fi

@@ -6,6 +6,7 @@ resources:
   - ../namespace.yaml
   - pvc.yaml
   - serviceaccount.yaml
+  - namenode-ui-nodeport.yaml
   - ../../../components/hadoop-namenode
 patches:
   - path: kerberos-mounts.yaml

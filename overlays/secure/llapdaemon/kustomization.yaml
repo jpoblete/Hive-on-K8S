@@ -251,23 +251,38 @@ patches:
 
   - patch: |-
       - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: remove
+        path: /spec/clusterIP
+      - op: replace
         path: /spec/ports
         value:
           - port: 15001
             targetPort: 15001
+            nodePort: 31501
             name: rpc
+            protocol: TCP
           - port: 15002
             targetPort: 15002
+            nodePort: 31502
             name: web
+            protocol: TCP
           - port: 15003
             targetPort: 15003
+            nodePort: 31503
             name: output
+            protocol: TCP
           - port: 15004
             targetPort: 15004
+            nodePort: 31504
             name: management
+            protocol: TCP
           - port: 15551
             targetPort: 15551
+            nodePort: 31551
             name: shuffle
+            protocol: TCP
     target:
       kind: Service
       name: hivemetastore
