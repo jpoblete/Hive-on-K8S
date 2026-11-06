@@ -245,4 +245,22 @@
          <name>hive.txn.manager</name>
          <value>org.apache.hadoop.hive.ql.lockmgr.DbTxnManager</value>
       </property>
+      <!-- JDBC pool: max connection lifetime (1680000 ms = 28 minutes). -->
+      <property>
+         <name>hive.datasource.maxLifetime</name>
+         <value>1680000</value>
+      </property>
+      <!-- HMS-only: direct SQL handling + DataNucleus pool size. -->
+      <property>
+         <name>hive.metastore.try.direct.sql.ddl</name>
+         <value>true</value>
+      </property>
+      <property>
+         <name>hive.metastore.try.direct.sql</name>
+         <value>false</value>
+      </property>
+      <property>
+         <name>datanucleus.connectionPool.maxPoolSize</name>
+         <value>50</value>
+      </property>
 </configuration>

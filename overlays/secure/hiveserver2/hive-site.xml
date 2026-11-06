@@ -299,4 +299,9 @@
          <name>hive.txn.manager</name>
          <value>org.apache.hadoop.hive.ql.lockmgr.DbTxnManager</value>
       </property>
+      <!-- JDBC pool: max connection lifetime (1680000 ms = 28 minutes). -->
+      <property>
+         <name>hive.datasource.maxLifetime</name>
+         <value>1680000</value>
+      </property>
 </configuration>
