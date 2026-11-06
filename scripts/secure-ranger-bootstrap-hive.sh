@@ -54,13 +54,13 @@ except urllib.error.HTTPError as e:
         "type": "hive",
         "configs": {
             "username": "hive",
-            "password": "",
+            "password": "hive",
             "jdbc.driverClassName": "org.apache.hive.jdbc.HiveDriver",
             "jdbc.url": jdbc,
         },
         "description": "secure lab Hive (matches ranger-hive-security.xml)",
     }
-    created = req("POST", "/service?forceSave=true", body, timeout=60)
+    created = req("POST", "/service?forceSave=true", body, timeout=180)
     print("created secure_hive (id=%s)" % created.get("id"))
 '
 

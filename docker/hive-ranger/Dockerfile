@@ -1,7 +1,9 @@
 # Usage Notice: This project is not meant for commercial use without permission and proper credit.
 # Author: j.martinez.poblete@gmail.com
-# apache/hive:nightly + Ranger hive-agent (RANGER_GIT_REF=master) jars; build dist/ first: ./build-ranger-hive-plugin.sh
-FROM apache/hive:nightly
+# apache/hive + Ranger hive-agent jars; build dist/ first: ./build-ranger-hive-plugin.sh
+# Pin HIVE_BASE to the digest already running in the target cluster so HS2 matches HMS.
+ARG HIVE_BASE=apache/hive:nightly
+FROM ${HIVE_BASE}
 USER root
 # dist/jars/ populated by build-ranger-hive-plugin.sh (Ranger 2.4.0 plugin + REST client deps; no Hive 3.x jars).
 COPY dist/jars/*.jar /opt/hive/lib/
@@ -18,7 +20,7 @@ RUN rm -f /opt/hive/lib/javax.ws.rs-api-2.0.1.jar /opt/hive/lib/jersey-multipart
  && printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
     'jar=$(echo /opt/hive/beeline-client/hive-beeline-*-standalone.jar)' \
     'export JLINE_TERMINAL=dumb' \
-    'exec java -Dorg.jline.terminal.type=dumb -jar "${jar}" "$@"' > /opt/hive/bin/beeline \
+    'exec java -Djavax.security.auth.useSubjectCredsOnly=false -Dorg.jline.terminal.type=dumb -jar "${jar}" "$@"' > /opt/hive/bin/beeline \
  && chmod +x /opt/hive/bin/beeline \
  && find /opt/hadoop -path '*/lib/jersey-*.jar' -delete \
  && mkdir -p /opt/hive/ranger/policycache && chown -R hive:hive /opt/hive/ranger 2>/dev/null || true

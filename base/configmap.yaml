@@ -675,6 +675,11 @@ data:
           if [ -f "${beeline_sh}" ] && grep -F -q 'beelineJarPath=`ls ${HIVE_LIB}/hive-beeline-*.jar`' "${beeline_sh}"; then
              sed -i 's#beelineJarPath=`ls ${HIVE_LIB}/hive-beeline-\*\.jar`#beelineJarPath=`ls ${HIVE_LIB}/hive-beeline-*.jar.off-hs2-webui 2>/dev/null | head -1`#' "${beeline_sh}"
           fi
+          # docker/hive-ranger replaces bin/beeline with java -jar. Kerberos tickets are ignored without this flag.
+          if [ -f "${HIVE_HOME}/bin/beeline" ] && grep -q 'beeline-client/hive-beeline' "${HIVE_HOME}/bin/beeline" \
+             && ! grep -q 'useSubjectCredsOnly' "${HIVE_HOME}/bin/beeline"; then
+             sed -i 's|exec java |exec java -Djavax.security.auth.useSubjectCredsOnly=false |' "${HIVE_HOME}/bin/beeline"
+          fi
        fi
        hive_service_extra=()
        if [ "${SERVICE}" = "hiveserver2" ] && [ -n "${POD_NAME:-}" ]; then

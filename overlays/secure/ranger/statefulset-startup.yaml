@@ -10,6 +10,10 @@ spec:
     spec:
       containers:
         - name: ranger
+          # amd64 image is built from the arm64 Admin tree and runs setup.sh, which
+          # writes /var/run/ranger and /etc/init.d. The Hub arm64 image pre-creates those as ranger.
+          securityContext:
+            runAsUser: 0
           env:
             - name: RANGER_SUPPORTED_COMPONENTS
               value: hive,hdfs

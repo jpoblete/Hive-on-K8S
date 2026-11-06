@@ -1,6 +1,8 @@
 # Usage Notice: This project is not meant for commercial use without permission and proper credit.
 # Author: j.martinez.poblete@gmail.com
-# Phase 1: Ranger Admin only (no Hive/HDFS plugins yet). Opt-in: HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure
+# Ranger Admin. Opt-in: HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure
+# NodePort 30680 is inside the gateway HAProxy range (30000-32767).
+# Browser login URL: HIVECTL_RANGER_EXTERNAL_URL (default http://127.0.0.1:6080 for kubectl port-forward).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: secure
@@ -23,6 +25,12 @@ patches:
       - op: replace
         path: /metadata/namespace
         value: secure
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30680
     target:
       kind: Service
       name: ranger

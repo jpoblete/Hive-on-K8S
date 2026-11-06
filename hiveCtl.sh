@@ -62,6 +62,8 @@ function help(){
    echo "  Disable: HIVECTL_HS2_PORT_FORWARD=0   Override bases: HIVECTL_HS2_LOCAL_PORT_BASE=<port>"
    echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
    echo "Ranger (secure, optional): HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure   or: ./hiveCtl.sh start secure ranger"
+   echo "  NodePort 30680. Browser URL: HIVECTL_RANGER_EXTERNAL_URL (default http://127.0.0.1:6080)"
+   echo "  amd64 clusters: RANGER_ADMIN_IMAGE=hive-on-k8s/ranger:2.4.0-amd64 (docker/ranger-admin). Hub tag is arm64 only."
    echo "Ranger Hive plugin (secure HS2 Phase 2): build docker/hive-ranger, then HIVECTL_SECURE_RANGER_HS2=1 ./hiveCtl.sh start secure hiveserver2"
    echo "  With HS2 plugin, hiveCtl creates secure_hive + lab admin policies (HIVECTL_SECURE_RANGER_BOOTSTRAP_HIVE=auto; 0 to skip)"
    echo "  Image: HIVE_RANGER_IMAGE=hive-on-k8s/hive-ranger:2.4.0-nightly (default)"
@@ -641,6 +643,14 @@ function applyOverlayKustomize(){
       ranger_image="${HIVE_RANGER_IMAGE:-hive-on-k8s/hive-ranger:2.4.0-nightly}"
       manifest="$(printf '%s\n' "${manifest}" | sed "s|image: hive-on-k8s/hive-ranger:2.4.0-nightly|image: ${ranger_image}|g")"
    fi
+   if [[ "${overlay_path}" == */ranger/ ]] || [[ "${overlay_path}" == */ranger ]]; then
+      if [ -n "${RANGER_ADMIN_IMAGE:-}" ]; then
+         manifest="$(printf '%s\n' "${manifest}" | sed "s|image: apache/ranger:2.4.0|image: ${RANGER_ADMIN_IMAGE}|g")"
+      fi
+      if [ -n "${HIVECTL_RANGER_EXTERNAL_URL:-}" ]; then
+         manifest="$(printf '%s\n' "${manifest}" | sed "s|http://127.0.0.1:6080|${HIVECTL_RANGER_EXTERNAL_URL}|g")"
+      fi
+   fi
    printf '%s\n' "${manifest}" | kubectl apply -f -
 }
 # Start one overlay/component and wait for its pod readiness.
@@ -754,15 +764,23 @@ function startOverlay(){
    if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
       ensureHuePortForward "${namespace}" || true
    fi
-   if hs2OverlayServiceStarted "${namespace}" "${service}"; then
-      ensureHs2PortForward "${namespace}" || true
-      ensureHiveSysSchema "${namespace}" || return 1
-   fi
    if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
       ensureRangerPortForward "${namespace}" || true
    fi
    if [ "${namespace}" = "secure" ] && [ "${service}" = "hiveserver2" ]; then
-      ensureSecureRangerHiveBootstrap "${namespace}" || true
+      # Policies must exist before schematool. The plugin denies CREATE until it polls them.
+      if ! ensureSecureRangerHiveBootstrap "${namespace}"; then
+         echo "Ranger Hive bootstrap failed; Hive SYS schema init needs secure_hive policies" >&2
+         return 1
+      fi
+      if [ "${HIVECTL_SECURE_RANGER_HS2:-0}" = "1" ] && ! secureRangerHiveBootstrapDisabled; then
+         echo "Waiting 35s for HS2 to poll Ranger policies before Hive SYS schema init ..."
+         sleep 35
+      fi
+   fi
+   if hs2OverlayServiceStarted "${namespace}" "${service}"; then
+      ensureHs2PortForward "${namespace}" || true
+      ensureHiveSysSchema "${namespace}" || return 1
    fi
    if [ "${service}" = "llapdaemon" ]; then
       case "${namespace}" in llap|secure) ensureLlapDaemonPortForward "${namespace}" || true ;; esac
@@ -1479,6 +1497,10 @@ url="${BEELINE_URL:?BEELINE_URL is empty}"
 export USE_DEPRECATED_CLI=true
 shopt -s nullglob
 off_jars=("${HIVE_HOME:-/opt/hive}/lib"/hive-beeline-*-standalone.jar.off-hs2-webui)
+if [ "${#off_jars[@]}" -eq 0 ]; then
+  # docker/hive-ranger moves the fat jar to beeline-client at image build.
+  off_jars=("${HIVE_HOME:-/opt/hive}/beeline-client"/hive-beeline-*-standalone.jar)
+fi
 if [ "${#off_jars[@]}" -gt 0 ]; then
   export HADOOP_CLASSPATH="${off_jars[0]}${HADOOP_CLASSPATH:+:${HADOOP_CLASSPATH}}"
 fi
