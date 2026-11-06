@@ -11,7 +11,7 @@ data:
   # Shared by Hive metastore, Hue, and (secure) Ranger on a single mysql-0 pod.
   custom.cnf: |
     [mysqld]
-    max_connections=400
+    max_connections=1024
     wait_timeout=600
     interactive_timeout=600
   osSetup.sh: |
