@@ -46,7 +46,7 @@ function help(){
    echo "        hiveCtl get passwd <alias>             (same; overlay defaults to secure, or HIVECTL_PASSWD_OVERLAY)"
    echo "        hiveCtl status   (active components, ready/total pod counts, web UI NodePort when exposed)"
    echo ""
-   echo "Hue (standalone|mini|llap|secure): port-forward (standalone=8885, mini=8886, llap=8887, secure=8888)"
+   echo "Hue (standalone|mini|llap|secure|warehouse): port-forward (standalone=8885, mini=8886, llap=8887, secure=8888, warehouse=8889)"
    echo "  (kubectl port-forward in background unless the port already works, e.g. kind/llap-cluster.yaml)"
    echo "  While hue-0 is Ready, a background monitor restarts port-forward every minute if localhost stops responding"
    echo "  Disable forward: HIVECTL_HUE_PORT_FORWARD=0   Override port: HIVECTL_HUE_LOCAL_PORT=<port>"
@@ -57,8 +57,8 @@ function help(){
    echo "  Login: admin + password from: kubectl get secret hive-credentials -n secure -o jsonpath='{.data.ranger-admin-password}' | base64 -d; echo"
    echo "LLAP daemon UI: http://localhost:15002 after start llapdaemon (pod llapdaemon-0)"
    echo "  Disable: HIVECTL_LLAP_DAEMON_PORT_FORWARD=0   Port: HIVECTL_LLAP_DAEMON_LOCAL_PORT=15002"
-   echo "HiveServer2 (standalone|mini|llap|secure): port-forward thrift/http/webui (base+0/+1/+2):"
-   echo "  standalone 11000-11002 · mini 11100-11102 · llap 11200-11202 · secure 11300-11302"
+   echo "HiveServer2 (standalone|mini|llap|secure|warehouse): port-forward thrift/http/webui (base+0/+1/+2):"
+   echo "  standalone 11000-11002 · mini 11100-11102 · llap 11200-11202 · secure 11300-11302 · warehouse 11400-11402"
    echo "  Disable: HIVECTL_HS2_PORT_FORWARD=0   Override bases: HIVECTL_HS2_LOCAL_PORT_BASE=<port>"
    echo "Profile secure: llap-shaped Hive (2 HMS, 2 HS2, 2 LLAP) + KDC, NN + 3 DNs, ZK, Hue (./hiveCtl.sh start secure)"
    echo "Ranger (secure, optional): HIVECTL_SECURE_RANGER=1 ./hiveCtl.sh start secure   or: ./hiveCtl.sh start secure ranger"
@@ -638,6 +638,7 @@ function hueDefaultLocalPort(){
       mini) echo 8886 ;;
       llap) echo 8887 ;;
       secure) echo 8888 ;;
+      warehouse) echo 8889 ;;
       *) echo 8888 ;;
    esac
 }
@@ -647,6 +648,7 @@ function hueDefaultNodePort(){
       mini) echo 30887 ;;
       llap) echo 30888 ;;
       secure) echo 30889 ;;
+      warehouse) echo 30890 ;;
       *) echo "" ;;
    esac
 }
@@ -1244,6 +1246,7 @@ function hs2LocalPortBase(){
       mini) echo 11100 ;;
       llap) echo 11200 ;;
       secure) echo 11300 ;;
+      warehouse) echo 11400 ;;
       *) echo 11000 ;;
    esac
 }

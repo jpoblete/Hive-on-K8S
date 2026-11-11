@@ -34,14 +34,15 @@ Full methodology, SQL, and tables: **[docs/benchmark-llap-acid-2026-11.md](docs/
 
 ## Contents
 
-Read **Profiles** in order (simplest first). UIs and kind setup are grouped under **[Browser UIs & kind](#browser-uis-and-kind-llap--secure)**.
+Read **Profiles** in order (simplest first). UIs and kind setup are grouped under **[Browser UIs & kind](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)**.
 
 - [**LLAP & ACID benchmark (Nov 2026)**](docs/benchmark-llap-acid-2026-11.md) — **real-cluster** timings: analytical + transactional workloads
 - [Images by profile](#images-by-profile)
 - [Prerequisites](#prerequisites) · [Hardware](#hardware-requirements)
-- [**Profiles**](#profiles) — `standalone` → `mini` → `llap` → `secure`
+- [**Profiles**](#profiles) — `standalone` → `mini` → `llap` → `secure` → `warehouse`
 - [**Secure profile (detailed)**](docs/secure-profile.md) — Kerberos ZK, Tez jar cache, disk, smoke tests
-- [Browser UIs & kind (all Hue profiles)](#browser-uis-and-kind-llap--secure)
+- [**Warehouse profile**](docs/warehouse-profile.md) — secure stack + Cassandra + Trino + custom Hue
+- [Browser UIs & kind (all Hue profiles)](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)
 - [Data safety](#data-safety) · [Bootstrap model](#bootstrap-model) · [Lab OS users](#lab-os-users-supergroup)
 - [Smoke tests](#smoke-tests) · [Validation](#validation)
 
@@ -59,6 +60,11 @@ secure:       apache/hive:nightly (same LLAP stack as llap: Metastore x2, HiveSe
               apache/hadoop:3.4.1 (HDFS: 1 NameNode + 3 DataNode StatefulSets; Kerberos; dfs.replication=3)
               debian:bookworm-slim (MIT KDC in krb5kdc-0)
               gethue/hue:latest (Hue → HS2 with SASL/Kerberos backend)
+warehouse:    apache/hive:nightly, apache/hadoop:3.4.1, debian:bookworm-slim (MIT KDC)
+              cassandra:4.1.12 + Kerberos authenticator (hive-on-k8s/cassandra-kerberos:4.1.12, custom)
+              cassandra:4.1.12 password node (hive-on-k8s/cassandra-password:4.1.12, custom)
+              trinodb/trino:484 (Hive + Cassandra catalogs)
+              hive-on-k8s/hue-trino (custom: gethue/hue + SQLAlchemy 1.4 + sqlalchemy-trino)
 ```
 
 `mini` and `standalone` pin the released **4.2.0** image. **`llap` and `secure` use the moving `nightly` tag** (Beeline reports **4.3.0-SNAPSHOT** today) so Tez and LLAP pick up fixes not in 4.2.0—notably [HIVE-29566](https://issues.apache.org/jira/browse/HIVE-29566), where reopening a Tez session in the same HiveServer2 JVM could fail with `JvmMetrics already exists` on grouped/aggregating queries. After an image bump, metastore pods run `schematool` on startup if the schema version changed. Leave headroom on kind or Docker Desktop nodes when pulling `nightly` (~1.5 GiB per node that schedules a Hive pod). To pin `llap` / `secure` to a release tag again, change the image patch in each profile’s `hivemetastore`, `hiveserver2`, and `llapdaemon` kustomizations.
@@ -134,7 +140,7 @@ Container limits are above JVM heap (overhead + native memory): Hive **3 Gi**, H
 
 ## hiveCtl quick reference
 
-Kubernetes **namespace = profile name** (`standalone`, `mini`, `llap`, `secure`). Run **one profile at a time** on a local lab ([Hardware](#hardware-requirements)).
+Kubernetes **namespace = profile name** (`standalone`, `mini`, `llap`, `secure`, `warehouse`). Run **one profile at a time** on a local lab ([Hardware](#hardware-requirements)).
 
 | Action | Command |
 |--------|---------|
@@ -144,6 +150,7 @@ Kubernetes **namespace = profile name** (`standalone`, `mini`, `llap`, `secure`)
 | Backup / restore / cleanup | `./hiveCtl.sh backup|restore|cleanup <profile> [backup-dir]` |
 | Kind **`/var`** disk | `./hiveCtl.sh disk` ([Kind disk space](#kind-disk-space-imagepullbackoff)) |
 | **`secure`** keytabs | `./hiveCtl.sh resync-keytabs secure` (after KDC host list changes) |
+| **`warehouse`** keytabs | `./hiveCtl.sh resync-keytabs warehouse` (refreshes the Secret; then restart the Kerberos pods in `warehouse` yourself — only `secure` restarts automatically) |
 
 **Hive CLI:** `kubectl exec -it hiveserver2-0 -n <profile> -- bash` (interactive shells auto **`su - hive`** with cwd **`/opt/hive`** on metastore / HS2 / LLAP pods) → `beeline`, `createTable.sh man managed_3_1 3 1 10 1`. **Standalone:** `hive-0` container `hiveserver2`. Details: [Smoke tests](#smoke-tests).
 
@@ -152,7 +159,7 @@ Kubernetes **namespace = profile name** (`standalone`, `mini`, `llap`, `secure`)
 Profiles are documented **simplest first**, each step adding services and operational complexity:
 
 ```text
-standalone  →  mini  →  llap  →  secure
+standalone  →  mini  →  llap  →  secure  →  warehouse
   Derby+Hue      HDFS+MySQL     ZK; 2 HMS/HS2/LLAP  same Hive tier +
   one pod        1 MS, 1 HS2    + Hue               KDC, Kerberos HDFS
                  + Hue          (all four ship Hue)
@@ -166,7 +173,7 @@ standalone  →  mini  →  llap  →  secure
 | **Stack** | `mysql → hive → hue` (Derby metastore stays in the Hive pod) |
 | **Overlays** | `overlays/standalone/hive`, `mysql`, `hue` |
 | **Start / stop** | `./hiveCtl.sh start standalone` · `./hiveCtl.sh stop standalone` |
-| **UIs** | Hue **http://localhost:8885** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
+| **UIs** | Hue **http://localhost:8885** ([Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)) |
 | **Try it** | [Smoke tests → standalone](#smoke-tests) |
 
 ### `mini`
@@ -177,7 +184,7 @@ standalone  →  mini  →  llap  →  secure
 | **Stack** | `hadoop → mysql → hivemetastore → hiveserver2 → hue` |
 | **Overlays** | `overlays/mini/*` |
 | **Start / stop** | `./hiveCtl.sh start mini` · `./hiveCtl.sh stop mini` |
-| **UIs** | Hue **http://localhost:8886** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
+| **UIs** | Hue **http://localhost:8886** ([Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)) |
 | **HDFS** | `kubectl exec hadoop-0 -n mini -- hdfs dfs -ls /` |
 | **Try it** | [Smoke tests → mini](#smoke-tests) |
 
@@ -190,9 +197,9 @@ standalone  →  mini  →  llap  →  secure
 | **Hive tier** | **2** Metastore · **2** HiveServer2 · **2** LLAP daemons (StatefulSets, `replicas: 2`) |
 | **Stack** | `hadoop → mysql → zookeeper → hivemetastore×2 → llapdaemon×2 → hiveserver2×2 → hue` |
 | **Overlays** | `overlays/llap/*` — shared `hive-site.xml` in `llap/hivemetastore` |
-| **Prerequisite** | Label **two** workers `node-role.kubernetes.io/llap` or use [`kind/llap-cluster.yaml`](kind/llap-cluster.yaml) ([details](#browser-uis-and-kind-llap--secure)) |
+| **Prerequisite** | Label **two** workers `node-role.kubernetes.io/llap` or use [`kind/llap-cluster.yaml`](kind/llap-cluster.yaml) ([details](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)) |
 | **Start / stop** | `./hiveCtl.sh start llap` · `./hiveCtl.sh stop llap` |
-| **UIs** | Hue **http://localhost:8887** · LLAP **http://localhost:15002** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
+| **UIs** | Hue **http://localhost:8887** · LLAP **http://localhost:15002** ([Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)) |
 | **Query path** | Tez AM in HiveServer2 (**local mode**, no YARN) → fragments on `@llap0` daemons; Beeline via ZK (`BEELINE_URL` in pods) |
 | **Logs on HDFS** | `hdfs://nameservice:8020/user/hive/logs/llap/…` — `tez/application_*`, `llap/application_*`, stable `*.log` ([`samples/logging/`](samples/logging/README.md)) |
 | **Try it** | [Smoke tests → llap](#smoke-tests) |
@@ -210,7 +217,7 @@ standalone  →  mini  →  llap  →  secure
 | **Components** | `components/krb5kdc`, `hadoop-namenode`, `hadoop-datanode` · `overlays/secure/*` |
 | **Start / stop** | `./hiveCtl.sh start secure` (KDC → Hadoop → …; first start waits for **3 DNs**) · `./hiveCtl.sh stop secure` |
 | **Shells** | `hadoop-namenode-0`, `hiveserver2-0` (`su - hive`) |
-| **UIs** | Hue **http://localhost:8888** · LLAP **http://localhost:15002** ([Browser UIs](#browser-uis-and-kind-llap--secure)) |
+| **UIs** | Hue **http://localhost:8888** · LLAP **http://localhost:15002** ([Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)) |
 | **Logs on HDFS** | `hdfs://nameservice:8020/user/hive/logs/secure/…` — **`tez/`** and **`llap/`** query exports ([`samples/logging/`](samples/logging/README.md)) |
 | **Try it** | [Smoke tests → secure](#smoke-tests) |
 
@@ -226,9 +233,24 @@ standalone  →  mini  →  llap  →  secure
 
 <a id="secure-hue"></a>
 
-## Browser UIs and kind (`standalone` / `mini` / `llap` / `secure`)
+### `warehouse`
 
-All four profiles ship **[Hue](https://gethue.com/)** (`gethue/hue:latest`). **`standalone`**, **`mini`**, and **`llap`**: JDBC user **`hive`** / **`beeline-password`**. **`secure`**: browser login stays Hue-local; HS2 uses Kerberos ([secure Hue](#secure-hue)).
+| | |
+|--|--|
+| **Purpose** | Kerberos-secured warehouse: Hive on the `secure` stack plus **Cassandra** and **Trino** queryable from **Hue** |
+| **Realm / namespace** | `WAREHOUSE.LAB` · namespace `warehouse` |
+| **Adds (on top of `secure`)** | Kerberos Cassandra 4.1.12 (custom authenticator); a password-auth Cassandra node for Trino; Trino 484 with `hive` and `cassandra` catalogs; Hue on a custom image with SQLAlchemy 1.4 + `sqlalchemy-trino` |
+| **Stack** | `krb5kdc → hadoop-namenode (+3 datanode) → zookeeper → cassandra (kerberos) → mysql → ranger → hivemetastore → hiveserver2 → trino → hue` |
+| **Components** | `overlays/warehouse/*` · `docker/cassandra-kerberos`, `docker/cassandra-password`, `docker/hue-trino` |
+| **Start / stop** | `./hiveCtl.sh start warehouse` · `./hiveCtl.sh stop warehouse` (reverse order) |
+| **UIs** | Hue **http://localhost:8889** ([Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse)) |
+| **Try it** | Hue → Trino interpreter (`hive` and `cassandra` catalogs) and Hue → Hive (`hiveserver2`) |
+
+Full details, custom-image build steps, and the Cassandra password-node design: [docs/warehouse-profile.md](docs/warehouse-profile.md).
+
+## Browser UIs and kind (`standalone` / `mini` / `llap` / `secure` / `warehouse`)
+
+All five profiles ship **[Hue](https://gethue.com/)** (`gethue/hue:latest`). **`standalone`**, **`mini`**, and **`llap`**: JDBC user **`hive`** / **`beeline-password`**. **`secure`**: browser login stays Hue-local; HS2 uses Kerberos ([secure Hue](#secure-hue)).
 
 Each profile uses a **different localhost port** so two stacks can stay up without colliding (NodePorts **30886–30889**).
 
@@ -238,6 +260,7 @@ Each profile uses a **different localhost port** so two stacks can stay up witho
 | **`mini`** | **http://localhost:8886/hue/accounts/login** | **30887** |
 | **`llap`** | **http://localhost:8887/hue/accounts/login** | **30888** |
 | **`secure`** | **http://localhost:8888/hue/accounts/login** | **30889** |
+| **`warehouse`** | **http://localhost:8889/hue/accounts/login** | **30890** |
 
 **HiveServer2** (Thrift **10000**, HTTP **10001**, Web UI **10002**) is exposed the same way: **`svc/hiveserver2`** is **NodePort** in every profile, and **`hiveCtl`** port-forwards three localhost ports per profile (no collision across overlays):
 
@@ -247,6 +270,7 @@ Each profile uses a **different localhost port** so two stacks can stay up witho
 | **`mini`** | **localhost:11100** | **11101** | **http://localhost:11102/** | **31010–31012** |
 | **`llap`** | **localhost:11200** | **11201** | **http://localhost:11202/** | **31020–31022** |
 | **`secure`** | **localhost:11300** | **11301** | **http://localhost:11302/** | **31030–31032** |
+| **`warehouse`** | **localhost:11400** | **11401** | **http://localhost:11402/** | **31040–31042** |
 
 On **`secure`**, optional **NodePort** browser entry points (same ranges as Hue/HS2 on real clusters, or map them in **`kind/llap-cluster.yaml`**): **HDFS NameNode Web UI** **`http://<node-ip>:30970/`** (Service **`hadoop-namenode-ui`**, container port **9870**; **`nameservice`** stays headless for **`hdfs://nameservice:8020`**), **LLAP daemon UI** **`<node-ip>:31502`** (in-cluster **15002**), **Ranger Admin** **`<node-ip>:30680`** (see **`docs/secure-ranger.md`**).
 
@@ -257,7 +281,7 @@ On **`secure`**, optional **NodePort** browser entry points (same ranges as Hue/
 | LLAP daemon (`llap` / `secure`) | **http://localhost:15002** — forwards **`llapdaemon-0`** after start |
 
 ```bash
-./hiveCtl.sh start standalone   # or: mini, llap, secure
+./hiveCtl.sh start standalone   # or: mini, llap, secure, warehouse
 # Manual if needed (match local port to profile):
 kubectl port-forward svc/hue -n standalone 8885:8888
 kubectl port-forward svc/hue -n mini 8886:8888
@@ -281,7 +305,7 @@ kubectl port-forward pod/llapdaemon-0 -n llap 15002:15002
 
 ### Kind disk space (`ImagePullBackOff`)
 
-Applies to **`standalone`**, **`mini`**, **`llap`**, and **`secure`** on Kind/Docker Desktop: large images (**`apache/hive`**, **`apache/hadoop`**, **`gethue/hue`**) can fill node **`/var`** and cause **`no space left on device`** on **`ImagePullBackOff`**.
+Applies to **`standalone`**, **`mini`**, **`llap`**, **`secure`**, and **`warehouse`** on Kind/Docker Desktop: large images (**`apache/hive`**, **`apache/hadoop`**, **`gethue/hue`**) can fill node **`/var`** and cause **`no space left on device`** on **`ImagePullBackOff`**.
 
 **`hiveCtl.sh`** checks each cluster node’s Kind container before **`start`**, **`restore`**, and **`backup`** (once per invocation) and runs **`crictl rmi --prune`** when **`/var`** use exceeds **90%** (**`HIVECTL_DISK_MAX_USE_PERCENT`**, disable with **`HIVECTL_DISK_CHECK=0`**).
 
@@ -319,7 +343,7 @@ Typical keys in Secret **`hive-credentials`** (namespace = profile name):
 | `hive-metastore-password` | MySQL user for the Hive metastore schema |
 | `mysql-root-password` | MySQL `root` |
 | `admin-password` | Documented copy of the fixed lab **`admin`** password (always **`admin`**) |
-| `hue-mysql-password`, `hue-secret-key` | **`standalone`**, **`mini`**, **`llap`**, and **`secure`** Hue |
+| `hue-mysql-password`, `hue-secret-key` | **`standalone`**, **`mini`**, **`llap`**, **`secure`**, and **`warehouse`** Hue |
 | `krb5-master-password`, `krb5-kadmin-password` | **`secure`** MIT KDC only |
 
 Treat backup directories as sensitive because they contain both data and credentials.
@@ -348,7 +372,7 @@ Restore:
 
 Restore also works after cleanup or on a new cluster: it creates the namespace with the backed-up credentials, starts the storage, loads the backup, and then starts the rest of the stack. If MySQL already has a volume, the current credentials are kept, because MySQL created its users with them and the metastore dump doesn't include users.
 
-Destructive cleanup requires confirmation and offers to create a backup first. For every profile (`mini`, `llap`, `secure`, `standalone`), cleanup deletes **all** PVCs in the namespace, **all** PVs bound to that namespace, and matching **`local-path-provisioner`** directories on Kind nodes (not only a fixed PVC name list).
+Destructive cleanup requires confirmation and offers to create a backup first. For every profile (`standalone`, `mini`, `llap`, `secure`, `warehouse`), cleanup deletes **all** PVCs in the namespace, **all** PVs bound to that namespace, and matching **`local-path-provisioner`** directories on Kind nodes (not only a fixed PVC name list).
 
 ```bash
 ./hiveCtl.sh cleanup standalone
@@ -473,7 +497,7 @@ LLAP **`admin`** OS user (`admin` / `admin`, **`supergroup`**):
 kubectl exec hiveserver2-0 -n llap -it -- su - admin -c 'id && hdfs dfs -ls /users 2>/dev/null || true'
 ```
 
-LLAP Hue — [Browser UIs](#browser-uis-and-kind-llap--secure):
+LLAP Hue — [Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse):
 
 ```bash
 kubectl get pods,svc -n llap -l app=hue
@@ -481,7 +505,7 @@ kubectl wait --for=condition=ready pod -l app=hue -n llap --timeout=300s
 # → http://localhost:8887 (kind template or port-forward)
 ```
 
-LLAP daemon UI — [Browser UIs](#browser-uis-and-kind-llap--secure):
+LLAP daemon UI — [Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse):
 
 ```bash
 kubectl get pods -n llap -l app=llapdaemon
@@ -523,7 +547,7 @@ Secure backup / restore smoke (destructive **`cleanup`** prompts for confirmatio
 
 On **Apple Silicon / aarch64** Kind, the first LLAP GROUP BY after HS2 restart may fail with shuffle **`IO_ERROR`** and succeed on **retry** when Tez co-locates tasks on one daemon — see [docs/secure-profile.md — LLAP cross-node shuffle](docs/secure-profile.md#llap-cross-node-shuffle-kind-on-apple-silicon).
 
-Secure Hue — [Browser UIs](#browser-uis-and-kind-llap--secure):
+Secure Hue — [Browser UIs](#browser-uis-and-kind-standalone--mini--llap--secure--warehouse):
 
 ```bash
 kubectl get pods,svc -n secure -l app=hue

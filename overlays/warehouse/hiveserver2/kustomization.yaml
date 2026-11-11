@@ -178,7 +178,7 @@ patches:
         value:
           port: 10000
           targetPort: 10000
-          nodePort: 31030
+          nodePort: 31040
           name: binary
           protocol: TCP
     target:
@@ -191,7 +191,7 @@ patches:
         value:
           port: 10001
           targetPort: 10001
-          nodePort: 31031
+          nodePort: 31041
           name: http
           protocol: TCP
     target:
@@ -204,7 +204,7 @@ patches:
         value:
           port: 10002
           targetPort: 10002
-          nodePort: 31032
+          nodePort: 31042
           name: webui
           protocol: TCP
     target:
