@@ -1661,12 +1661,13 @@ function ensureHiveSysSchema(){
          pod="hive-0"
          container_args=(-c hiveserver2)
          ;;
-      mini|llap|secure)
+      mini|llap|secure|warehouse)
          meta_db="mysql"
          pod="hiveserver2-0"
-         [ "${namespace}" = "secure" ] && kerberos=1
+         { [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ]; } && kerberos=1
          ;;
       *)
+         echo "Hive SYS schema init: no handler for namespace '${namespace}'; skipping"
          return 0
          ;;
    esac
