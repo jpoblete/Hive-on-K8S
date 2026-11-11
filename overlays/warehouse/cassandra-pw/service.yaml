@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra-pw
+  namespace: warehouse
+spec:
+  selector:
+    app: cassandra-pw
+  ports:
+    - name: cql
+      port: 9042
+      targetPort: 9042
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra-pw-headless
+  namespace: warehouse
+spec:
+  clusterIP: None
+  selector:
+    app: cassandra-pw
+  ports:
+    - name: cql
+      port: 9042
+      targetPort: 9042
+    - name: intra
+      port: 7000
+      targetPort: 7000

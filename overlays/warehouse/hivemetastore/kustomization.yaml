@@ -1,0 +1,93 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:  
+  - serviceaccount.yaml
+  - headless-service.yaml
+  - ../../../base
+#
+# Namespace adjustments
+#
+patches:
+  - path: kerberos-mounts.yaml
+  - path: probes-kerberos.yaml
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: warehouse
+    target:
+      name: hivemetastore
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/podManagementPolicy
+        value: Parallel
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  # Same nightly tag as llap (Tez/LLAP fixes; see README Images by profile)
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: apache/hive:nightly
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/serviceName
+        value: hivemetastore-headless
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: HIVE_LOG_HDFS_BASE
+          value: "hdfs://nameservice:8020/user/hive/logs/warehouse"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: HIVE_LOG_HDFS_SYNC_INTERVAL_SEC
+          value: "300"
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 90
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/lifecycle
+        value:
+          preStop:
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  if [ -n "${HIVE_LOG_HDFS_BASE:-}" ] && [ -f /opt/hive/bin/hdfs-log-sync.sh ]; then
+                    su -s /bin/bash hive -c '/opt/hive/bin/hdfs-log-sync.sh push' || true
+                  fi
+    target:
+      kind: StatefulSet
+      name: hivemetastore
+configMapGenerator:
+  - name: hivemetastore
+    behavior: merge
+    files:
+      - hive-site.xml=hive-site.xml
+      - core-site.xml=core-site.xml
+      - hdfs-site.xml=hdfs-site.xml

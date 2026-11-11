@@ -1,0 +1,22 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: warehouse
+resources:
+  - serviceaccount.yaml
+  - service.yaml
+  - statefulset.yaml
+configMapGenerator:
+  - name: cassandra-config
+    options:
+      disableNameSuffixHash: true
+    files:
+      - cassandra.yaml=cassandra.yaml
+  - name: kerberos-client
+    options:
+      disableNameSuffixHash: true
+    files:
+      - krb5.conf=../krb5.conf
+generatorOptions:
+  disableNameSuffixHash: true

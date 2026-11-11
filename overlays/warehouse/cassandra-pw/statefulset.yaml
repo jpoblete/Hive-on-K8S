@@ -1,0 +1,51 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cassandra-pw
+  namespace: warehouse
+spec:
+  serviceName: cassandra-pw-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cassandra-pw
+  template:
+    metadata:
+      labels:
+        app: cassandra-pw
+    spec:
+      containers:
+        - name: cassandra
+          image: hive-on-k8s/cassandra-password:4.1.12
+          ports:
+            - containerPort: 9042
+              name: cql
+            - containerPort: 7000
+              name: intra
+          env:
+            - name: CASSANDRA_CLUSTER_NAME
+              value: warehouse-pw
+            - name: MAX_HEAP_SIZE
+              value: 512M
+            - name: HEAP_NEWSIZE
+              value: 128M
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cassandra
+          readinessProbe:
+            exec:
+              command: ["/bin/bash", "-c", "nodetool status | grep -q '^UN'"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: hive-on-k8s-local-path
+        resources:
+          requests:
+            storage: 5Gi

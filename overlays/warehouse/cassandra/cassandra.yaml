@@ -1,0 +1,30 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Minimal cassandra.yaml for the warehouse lab (Apache Cassandra 4.1.12).
+# Kerberos client auth is wired through the authenticator below; the
+# authenticator class must be on the image classpath (see README).
+cluster_name: 'warehouse'
+num_tokens: 16
+hints_directory: /var/lib/cassandra/hints
+data_file_directories:
+  - /var/lib/cassandra/data
+commitlog_directory: /var/lib/cassandra/commitlog
+saved_caches_directory: /var/lib/cassandra/saved_caches
+listen_address: ''
+listen_interface: eth0
+rpc_address: 0.0.0.0
+broadcast_rpc_address: ''
+start_native_transport: true
+native_transport_port: 9042
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "cassandra-0.cassandra-headless.warehouse.svc.cluster.local"
+endpoint_snitch: SimpleSnitch
+authenticator: com.instaclustr.cassandra.auth.KerberosAuthenticator
+authorizer: AllowAllAuthorizer
+role_manager: CassandraRoleManager
+server_encryption_options:
+  internode_encryption: none
+client_encryption_options:
+  enabled: false

@@ -1,0 +1,15 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Warehouse KDC realm: WAREHOUSE.LAB (shared components/krb5kdc defaults to SECURE.LAB).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: krb5kdc
+spec:
+  template:
+    spec:
+      containers:
+        - name: krb5kdc
+          env:
+            - name: KRB5_REALM
+              value: WAREHOUSE.LAB

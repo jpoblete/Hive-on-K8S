@@ -1,0 +1,12 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Password-only Cassandra for Trino's cassandra catalog. Separate single-node cluster; the Kerberos
+# ring (cassandra/) is untouched. Stock cassandra:4.1.12 image, built-in PasswordAuthenticator.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: warehouse
+resources:
+  - statefulset.yaml
+  - service.yaml
+generatorOptions:
+  disableNameSuffixHash: true

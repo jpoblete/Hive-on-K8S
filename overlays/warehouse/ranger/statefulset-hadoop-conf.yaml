@@ -1,0 +1,21 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ranger
+spec:
+  template:
+    spec:
+      containers:
+        - name: ranger
+          volumeMounts:
+            - name: ranger-hadoop-conf
+              mountPath: /opt/ranger/admin/hadoop-conf/core-site.xml
+              subPath: hadoop-core-site.xml
+              readOnly: true
+      volumes:
+        - name: ranger-hadoop-conf
+          configMap:
+            name: ranger
+#EOF

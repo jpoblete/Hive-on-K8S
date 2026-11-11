@@ -1,0 +1,28 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Trino (coordinator + workers) for the warehouse profile, Kerberos-secured, with hive and cassandra catalogs.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: warehouse
+resources:
+  - serviceaccount.yaml
+  - service.yaml
+  - statefulset.yaml
+configMapGenerator:
+  # Each role gets its own ConfigMap with a single config.properties (its coordinator flag).
+  - name: trino-config
+    files:
+      - config.properties=config-coordinator.properties
+      - jvm.config
+      - node.properties
+  - name: trino-config-worker
+    files:
+      - config.properties=config-worker.properties
+      - jvm.config
+      - node.properties
+  - name: trino-catalogs
+    files:
+      - hive.properties
+      - cassandra.properties
+generatorOptions:
+  disableNameSuffixHash: true

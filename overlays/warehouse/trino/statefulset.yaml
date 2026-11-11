@@ -1,0 +1,183 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Trino 484: one coordinator (trino-coordinator-0) and two workers (trino-worker-0/1), Kerberos enabled.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: trino-coordinator
+  namespace: warehouse
+spec:
+  serviceName: trino-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trino
+      role: coordinator
+  template:
+    metadata:
+      labels:
+        app: trino
+        role: coordinator
+    spec:
+      serviceAccountName: trino
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: trino
+          image: trinodb/trino:484
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              ln -sf /etc/trino/keytab/${POD_NAME}.keytab /etc/trino/service.keytab &&
+              cp /etc/trino-catalog-src/cassandra.properties /usr/lib/trino/etc/catalog/cassandra.properties &&
+              cp /etc/trino-catalog-src/hive.properties /usr/lib/trino/etc/catalog/hive.properties &&
+              printf 'cassandra.username=%s\ncassandra.password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
+              exec /usr/lib/trino/bin/launcher run
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KRB5_REALM
+              value: WAREHOUSE.LAB
+          volumeMounts:
+            - name: catalog-live
+              mountPath: /usr/lib/trino/etc/catalog
+            - name: trino-catalogs
+              mountPath: /etc/trino-catalog-src
+              readOnly: true
+            - name: trino-config
+              mountPath: /usr/lib/trino/etc/config.properties
+              subPath: config.properties
+            - name: trino-config
+              mountPath: /usr/lib/trino/etc/node.properties
+              subPath: node.properties
+            - name: trino-config
+              mountPath: /usr/lib/trino/etc/jvm.config
+              subPath: jvm.config
+            - name: kerberos-config
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+              readOnly: true
+            - name: kerberos-keytabs
+              mountPath: /etc/trino/keytab
+              readOnly: true
+            - name: cassandra-creds
+              mountPath: /etc/trino/cassandra-creds
+              readOnly: true
+      volumes:
+        - name: catalog-live
+          emptyDir: {}
+        - name: trino-config
+          configMap:
+            name: trino-config
+        - name: trino-catalogs
+          configMap:
+            name: trino-catalogs
+        - name: kerberos-config
+          configMap:
+            name: kerberos-client
+            items:
+              - key: krb5.conf
+                path: krb5.conf
+        - name: kerberos-keytabs
+          secret:
+            secretName: kerberos-keytabs
+            defaultMode: 0440
+        - name: cassandra-creds
+          secret:
+            secretName: cassandra-pw-trino
+            defaultMode: 0440
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: trino-worker
+  namespace: warehouse
+spec:
+  serviceName: trino-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: trino
+      role: worker
+  template:
+    metadata:
+      labels:
+        app: trino
+        role: worker
+    spec:
+      serviceAccountName: trino
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: trino
+          image: trinodb/trino:484
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              ln -sf /etc/trino/keytab/${POD_NAME}.keytab /etc/trino/service.keytab &&
+              cp /etc/trino-catalog-src/cassandra.properties /usr/lib/trino/etc/catalog/cassandra.properties &&
+              cp /etc/trino-catalog-src/hive.properties /usr/lib/trino/etc/catalog/hive.properties &&
+              printf 'cassandra.username=%s\ncassandra.password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
+              exec /usr/lib/trino/bin/launcher run
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KRB5_REALM
+              value: WAREHOUSE.LAB
+          volumeMounts:
+            - name: catalog-live
+              mountPath: /usr/lib/trino/etc/catalog
+            - name: trino-catalogs
+              mountPath: /etc/trino-catalog-src
+              readOnly: true
+            - name: trino-config-worker
+              mountPath: /usr/lib/trino/etc/config.properties
+              subPath: config.properties
+            - name: trino-config-worker
+              mountPath: /usr/lib/trino/etc/node.properties
+              subPath: node.properties
+            - name: trino-config-worker
+              mountPath: /usr/lib/trino/etc/jvm.config
+              subPath: jvm.config
+            - name: kerberos-config
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+              readOnly: true
+            - name: kerberos-keytabs
+              mountPath: /etc/trino/keytab
+              readOnly: true
+            - name: cassandra-creds
+              mountPath: /etc/trino/cassandra-creds
+              readOnly: true
+      volumes:
+        - name: catalog-live
+          emptyDir: {}
+        - name: trino-config-worker
+          configMap:
+            name: trino-config-worker
+        - name: trino-catalogs
+          configMap:
+            name: trino-catalogs
+        - name: kerberos-config
+          configMap:
+            name: kerberos-client
+            items:
+              - key: krb5.conf
+                path: krb5.conf
+        - name: kerberos-keytabs
+          secret:
+            secretName: kerberos-keytabs
+            defaultMode: 0440
+        - name: cassandra-creds
+          secret:
+            secretName: cassandra-pw-trino
+            defaultMode: 0440

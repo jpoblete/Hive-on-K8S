@@ -1,0 +1,30 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Server-side krb5.conf template domain map for the warehouse KDC (secure.svc -> warehouse.svc).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: krb5kdc-setup
+data:
+  krb5.conf.template: |
+    [libdefaults]
+        default_realm = __REALM__
+        dns_lookup_kdc = true
+        dns_lookup_realm = false
+        rdns = false
+        ticket_lifetime = 24h
+        forwardable = true
+        udp_preference_limit = 1
+
+    [realms]
+        __REALM__ = {
+            kdc = krb5kdc:88
+            admin_server = krb5kdc:749
+            default_domain = warehouse.lab
+        }
+
+    [domain_realm]
+        .warehouse.svc.cluster.local = __REALM__
+        warehouse.svc.cluster.local = __REALM__
+        .warehouse.lab = __REALM__
+        warehouse.lab = __REALM__

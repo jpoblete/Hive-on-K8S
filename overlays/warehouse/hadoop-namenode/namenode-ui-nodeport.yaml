@@ -1,0 +1,21 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# NodePort for the HDFS NameNode Web UI only. nameservice stays headless (ClusterIP None) for
+# hdfs://nameservice:8020 — do not convert that Service to NodePort.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hadoop-namenode-ui
+  namespace: warehouse
+  labels:
+    app: hadoop-namenode
+spec:
+  type: NodePort
+  selector:
+    app: hadoop-namenode
+  ports:
+    - name: http
+      port: 9870
+      targetPort: 9870
+      nodePort: 30970
+      protocol: TCP

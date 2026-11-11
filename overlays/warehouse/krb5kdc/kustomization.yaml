@@ -1,0 +1,56 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: warehouse
+resources:
+  - serviceaccount.yaml
+  - ../../../components/krb5kdc
+patches:
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: warehouse
+    target:
+      kind: StatefulSet
+      name: krb5kdc
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: warehouse
+    target:
+      kind: ConfigMap
+      name: krb5kdc-setup
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: warehouse
+    target:
+      kind: Service
+      name: krb5kdc
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: warehouse
+    target:
+      kind: Service
+      name: krb5kdc-headless
+  - patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: warehouse
+    target:
+      kind: ConfigMap
+      name: kerberos-client
+patches:
+  - path: krb5kdc-realm-patch.yaml
+  - path: krb5kdc-setup-patch.yaml
+  - path: kerberos-client-patch.yaml
+    target:
+      kind: ConfigMap
+      name: kerberos-client
+configMapGenerator:
+  - name: krb5kdc-setup
+    behavior: merge
+    files:
+      - secure-lab-hosts.list=warehouse-hosts.list

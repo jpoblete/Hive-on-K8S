@@ -1,0 +1,30 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# TCP probes open port 9083 and abort during SASL, flooding HMS logs with Thrift errors.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hivemetastore
+spec:
+  template:
+    spec:
+      containers:
+        - name: hivemetastore
+          startupProbe:
+            $patch: replace
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - grep -qE ':237[Bb] ' /proc/net/tcp6 /proc/net/tcp
+            periodSeconds: 5
+            failureThreshold: 720
+          readinessProbe:
+            $patch: replace
+            exec:
+              command:
+                - /bin/bash
+                - -ec
+                - grep -qE ':237[Bb] ' /proc/net/tcp6 /proc/net/tcp
+            periodSeconds: 10
+            failureThreshold: 3

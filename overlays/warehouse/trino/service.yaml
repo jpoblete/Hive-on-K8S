@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino
+  namespace: warehouse
+spec:
+  selector:
+    app: trino
+    role: coordinator
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-headless
+  namespace: warehouse
+spec:
+  clusterIP: None
+  selector:
+    app: trino
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

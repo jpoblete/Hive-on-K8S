@@ -1,0 +1,18 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Keep Tomcat/Ranger admin logs off the container writable layer (Kind containerd overlay).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ranger
+spec:
+  template:
+    spec:
+      containers:
+        - name: ranger
+          volumeMounts:
+            - name: ranger-ews-logs
+              mountPath: /opt/ranger/ranger-2.4.0-admin/ews/logs
+      volumes:
+        - name: ranger-ews-logs
+          emptyDir: {}

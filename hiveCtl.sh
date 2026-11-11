@@ -197,7 +197,7 @@ function ensureSecrets(){
       fi
    fi
 
-   if [ "${namespace}" = "secure" ]; then
+   if [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ]; then
       kubectl create secret generic hive-credentials -n "${namespace}" \
          --from-literal=root-password="${root_password}" \
          --from-literal=hive-password="${hive_password}" \
@@ -230,7 +230,7 @@ function ensureKrb5Secrets(){
    local krb5_kadmin_password=""
    local existing=""
 
-   [ "${namespace}" = "secure" ] || return 0
+   case "${namespace}" in secure|warehouse) ;; *) return 0 ;; esac
    ensureSecrets "${namespace}" || return 1
    existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.krb5-master-password}' 2>/dev/null)" || return 1
    if [ -n "${existing}" ]; then
@@ -264,7 +264,7 @@ function ensureKerberosKeytabSecret(){
    local keytab_file=""
    local create_args=()
 
-   [ "${namespace}" = "secure" ] || return 0
+   case "${namespace}" in secure|warehouse) ;; *) return 0 ;; esac
    if kubectl get secret kerberos-keytabs -n "${namespace}" >/dev/null 2>&1; then
       if [ -n "$(kubectl get secret kerberos-keytabs -n "${namespace}" -o jsonpath='{.data.hadoop-namenode-0\.keytab}' 2>/dev/null)" ] \
          && [ -z "${HIVECTL_KRB5_RESYNC_KEYTABS:-}" ]; then
@@ -317,7 +317,7 @@ function ensureHueSecrets(){
    local hue_secret_key=""
    local existing=""
 
-   case "${namespace}" in standalone|mini|llap|secure) ;; *) return 0 ;; esac
+   case "${namespace}" in standalone|mini|llap|secure|warehouse) ;; *) return 0 ;; esac
    ensureSecrets "${namespace}" || return 1
    existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.hue-mysql-password}' 2>/dev/null)" || return 1
    if [ -n "${existing}" ]; then
@@ -335,7 +335,7 @@ function ensureRangerSecrets(){
    local ranger_admin_password=""
    local existing=""
 
-   [ "${namespace}" = "secure" ] || return 0
+   [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ] || return 0
    ensureSecrets "${namespace}" || return 1
    existing="$(kubectl get secret hive-credentials -n "${namespace}" -o jsonpath='{.data.ranger-db-password}' 2>/dev/null)" || return 1
    if [ -z "${existing}" ]; then
@@ -599,25 +599,25 @@ function overlayActive(){
 }
 # Apply NameNode and three DataNodes together (NameNode startup waits for live DNs).
 function startSecureHadoop(){
-   local namespace="secure"
-   local nn_path="./overlays/secure/hadoop-namenode/"
-   local dn_path="./overlays/secure/hadoop-datanode/"
+   local namespace="${1:-secure}"
+   local nn_path="./overlays/${namespace}/hadoop-namenode/"
+   local dn_path="./overlays/${namespace}/hadoop-datanode/"
 
    ensureSecrets "${namespace}" || return 1
    ensureAdminSecrets "${namespace}" || return 1
    ensureKerberosKeytabSecret "${namespace}" || return 1
-   echo "Starting Overlay: secure_hadoop (namenode + 3 datanodes) ..."
+   echo "Starting Overlay: ${namespace}_hadoop (namenode + 3 datanodes) ..."
    kustomize build "${nn_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f - || return 1
    kustomize build "${dn_path}" --load-restrictor LoadRestrictionsNone | kubectl apply -f - || return 1
    waitForReady "${namespace}" "hadoop-datanode" || return 1
    waitForReady "${namespace}" "hadoop-namenode" || return 1
 }
 function stopSecureHadoop(){
-   local namespace="secure"
+   local namespace="${1:-secure}"
    local resources=""
    local resource=""
 
-   echo "Stopping Overlay: secure_hadoop (datanodes + namenode) ..."
+   echo "Stopping Overlay: ${namespace}_hadoop (datanodes + namenode) ..."
    for app in hadoop-datanode hadoop-namenode; do
       resources="$(kubectlNames sts,deploy,pods,cm,svc -n "${namespace}" --selector="app=${app}")" || return 1
       for resource in ${resources}; do
@@ -717,7 +717,24 @@ function applyOverlayKustomize(){
          manifest="$(printf '%s\n' "${manifest}" | sed "s|http://127.0.0.1:6080|${HIVECTL_RANGER_EXTERNAL_URL}|g")"
       fi
    fi
+   manifest="$(portableManifestRewrite "${manifest}")"
    printf '%s\n' "${manifest}" | kubectl apply -f -
+}
+# Per-cluster portability (kind desktop vs EC2/Cloudera K8S). Only rewrites when the
+# variable is set, so defaults (kind + local images + hive-on-k8s-local-path) are unchanged.
+#   HIVE_STORAGE_CLASS_NAME  -> PVC/StatefulSet storageClassName (cluster's own class)
+#   HIVE_IMAGE_REGISTRY      -> prefix for hive-on-k8s/* images (e.g. registry.example.com/hive)
+function portableManifestRewrite(){
+   local manifest="$1"
+   local default_sc="hive-on-k8s-local-path"
+
+   if [ -n "${HIVE_STORAGE_CLASS_NAME:-}" ] && [ "${HIVE_STORAGE_CLASS_NAME}" != "${default_sc}" ]; then
+      manifest="$(printf '%s\n' "${manifest}" | sed "s|storageClassName: ${default_sc}|storageClassName: ${HIVE_STORAGE_CLASS_NAME}|g")"
+   fi
+   if [ -n "${HIVE_IMAGE_REGISTRY:-}" ]; then
+      manifest="$(printf '%s\n' "${manifest}" | sed "s|image: hive-on-k8s/|image: ${HIVE_IMAGE_REGISTRY%/}/|g")"
+   fi
+   printf '%s\n' "${manifest}"
 }
 # Start one overlay/component and wait for its pod readiness.
 function startOverlay(){
@@ -743,21 +760,33 @@ function startOverlay(){
       ensureSecureRangerHs2KindImage || return 1
    fi
 
-   if [ "${target}" = "secure_hadoop-namenode" ]; then
-      overlayActive "secure_hadoop-namenode"
+   if [ "${target}" = "warehouse_llapdaemon" ]; then
+      warnIfNoLlapNodes
+   fi
+   if [ "${target}" = "warehouse_cassandra" ]; then
+      ensureWarehouseCassandraKindImage || return 1
+   fi
+
+   if [ "${target}" = "secure_hadoop-namenode" ] || [ "${target}" = "warehouse_hadoop-namenode" ]; then
+      overlayActive "${target}"
       case $? in
          0)
-            echo "Overlay: secure_hadoop is already ACTIVE, try stopping/restarting it"
+            echo "Overlay: ${namespace}_hadoop is already ACTIVE, try stopping/restarting it"
+            # NameNode may exist without DataNodes (partial earlier start); apply the DataNode overlay if missing.
+            if ! kubectl get statefulset hadoop-datanode -n "${namespace}" >/dev/null 2>&1; then
+               echo "Hadoop NameNode is active but DataNodes are missing; applying DataNode overlay ..."
+               kustomize build "./overlays/${namespace}/hadoop-datanode/" --load-restrictor LoadRestrictionsNone | kubectl apply -f - || return 1
+            fi
             waitForReady "${namespace}" "hadoop-datanode"
             waitForReady "${namespace}" "hadoop-namenode"
             ;;
-         1) startSecureHadoop || return 1 ;;
+         1) startSecureHadoop "${namespace}" || return 1 ;;
          *) return 1 ;;
       esac
       return 0
    fi
-   if [ "${target}" = "secure_hadoop-datanode" ]; then
-      echo "Overlay: secure_hadoop-datanode is started with secure_hadoop-namenode (use: hiveCtl start secure hadoop-namenode)"
+   if [ "${target}" = "secure_hadoop-datanode" ] || [ "${target}" = "warehouse_hadoop-datanode" ]; then
+      echo "Overlay: ${namespace}_hadoop-datanode is started with ${namespace}_hadoop-namenode (use: hiveCtl start ${namespace} hadoop-namenode)"
       return 0
    fi
 
@@ -773,7 +802,7 @@ function startOverlay(){
          if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
             ensureHueSecrets "${namespace}" || return 1
          fi
-         if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+         if { [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ]; } && [ "${service}" = "ranger" ]; then
             ensureRangerSecrets "${namespace}" || return 1
             if [ "${HIVECTL_RANGER_REINIT:-0}" = "1" ]; then
                reinitRangerDatabase "${namespace}" || return 1
@@ -792,11 +821,11 @@ function startOverlay(){
             if [ "${namespace}" = "secure" ] && [ "${service}" = "krb5kdc" ]; then
                ensureKrb5Secrets "${namespace}" || return 1
             fi
-            if [ "${namespace}" = "secure" ]; then
+            if [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ]; then
                case "${service}" in
                   krb5kdc)
                      ;;
-                  hadoop-namenode|hadoop-datanode|hivemetastore|hiveserver2|llapdaemon)
+                  hadoop-namenode|hadoop-datanode|hivemetastore|hiveserver2|llapdaemon|zookeeper|cassandra|hue|trino)
                      ensureKerberosKeytabSecret "${namespace}" || return 1
                      ;;
                esac
@@ -804,14 +833,14 @@ function startOverlay(){
             if profileHasHue "${namespace}" && [ "${service}" = "hue" ]; then
                ensureHueSecrets "${namespace}" || return 1
             fi
-            if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+            if { [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ]; } && [ "${service}" = "ranger" ]; then
                ensureRangerSecrets "${namespace}" || return 1
                if [ "${HIVECTL_RANGER_REINIT:-0}" = "1" ]; then
                   reinitRangerDatabase "${namespace}" || return 1
                fi
             fi
             applyOverlayKustomize "${overlay_path}" || return 1
-            if [ "${namespace}" = "secure" ] && [ "${service}" = "ranger" ]; then
+            if { [ "${namespace}" = "secure" ] || [ "${namespace}" = "warehouse" ]; } && [ "${service}" = "ranger" ]; then
                waitForRangerMysqlInit "${namespace}" || return 1
             fi
             waitForReady "${namespace}" "${service}"
@@ -864,12 +893,12 @@ function stopOverlay(){
    local resources=""
    local resource=""
 
-   if [ "${target}" = "secure_hadoop-datanode" ]; then
-      echo "Overlay: secure_hadoop-datanode stops with secure_hadoop-namenode (use: hiveCtl stop secure hadoop-namenode)"
+   if [ "${target}" = "secure_hadoop-datanode" ] || [ "${target}" = "warehouse_hadoop-datanode" ]; then
+      echo "Overlay: ${namespace}_hadoop-datanode stops with ${namespace}_hadoop-namenode (use: hiveCtl stop ${namespace} hadoop-namenode)"
       return 0
    fi
-   if [ "${target}" = "secure_hadoop-namenode" ]; then
-      stopSecureHadoop
+   if [ "${target}" = "secure_hadoop-namenode" ] || [ "${target}" = "warehouse_hadoop-namenode" ]; then
+      stopSecureHadoop "${namespace}"
       return $?
    fi
 
@@ -940,7 +969,7 @@ function hueLocalPortConflictMessage(){
    local pidfile=""
    local other_port=""
 
-   for other in standalone mini llap secure; do
+   for other in standalone mini llap secure warehouse; do
       [ "${other}" = "${namespace}" ] && continue
       pidfile="$(huePortForwardPidFile "${other}")"
       [ -f "${pidfile}" ] || continue
@@ -1301,7 +1330,7 @@ function hs2LocalPortConflictMessage(){
    local oports=""
 
    ports="$(hs2LocalPort "${namespace}" binary) $(hs2LocalPort "${namespace}" http) $(hs2LocalPort "${namespace}" webui)"
-   for other in standalone mini llap secure; do
+   for other in standalone mini llap secure warehouse; do
       [ "${other}" = "${namespace}" ] && continue
       pidfile="$(hs2PortForwardPidFile "${other}")"
       [ -f "${pidfile}" ] || continue
@@ -1464,7 +1493,7 @@ function ensureHs2PortForward(){
 function ensureHs2PortForwardsForActiveProfiles(){
    local ns=""
 
-   for ns in standalone mini llap secure; do
+   for ns in standalone mini llap secure warehouse; do
       profileHasHs2Service "${ns}" || continue
       kubectl get namespace "${ns}" >/dev/null 2>&1 || continue
       kubectl get svc hiveserver2 -n "${ns}" >/dev/null 2>&1 || continue
@@ -1841,7 +1870,7 @@ function ensureSecureRangerHiveBootstrap(){
    local namespace="${1:-secure}"
    local bootstrap_script="${HIVECTL_ROOT}/scripts/secure-ranger-bootstrap-hive.sh"
 
-   [ "${namespace}" = "secure" ] || return 0
+   case "${namespace}" in secure|warehouse) ;; *) return 0 ;; esac
    if secureRangerHiveBootstrapDisabled; then
       return 0
    fi
@@ -2063,6 +2092,20 @@ function ensureKindLocalImage(){
 function ensureSecureRangerHs2KindImage(){
    [ "${HIVECTL_SECURE_RANGER_HS2:-0}" = "1" ] || return 0
    ensureKindLocalImage "${HIVE_RANGER_IMAGE:-hive-on-k8s/hive-ranger:2.4.0-nightly}"
+}
+# LLAP daemons schedule onto nodes labeled node-role.kubernetes.io/llap (EC2/Cloudera: label worker nodes first).
+# Warn (do not block) when no labeled node exists, so a missing label is visible instead of silently Pending.
+function warnIfNoLlapNodes(){
+   local count=""
+   count="$(kubectl get nodes -l node-role.kubernetes.io/llap --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+   if [ "${count:-0}" = "0" ]; then
+      echo "Warning: no node labeled node-role.kubernetes.io/llap; llapdaemon pods will stay Pending." >&2
+      echo "         Label LLAP workers: kubectl label node <node> node-role.kubernetes.io/llap=" >&2
+   fi
+}
+# Warehouse Cassandra image (4.1.12 + Instaclustr Kerberos authenticator); built from docker/cassandra-kerberos.
+function ensureWarehouseCassandraKindImage(){
+   ensureKindLocalImage "${HIVE_CASSANDRA_IMAGE:-hive-on-k8s/cassandra-kerberos:4.1.12}"
 }
 function reportKindNodeDisk(){
    local node="$1"
@@ -2349,6 +2392,17 @@ function startStack(){
          fi
          components+=(zookeeper hivemetastore llapdaemon hiveserver2 hue)
          ;;
+      warehouse)
+         # Startup order: KDC -> ZooKeeper/Hadoop -> Cassandra -> MySQL -> Ranger -> HMS -> HS2 -> Trino -> Hue
+         ensureKrb5Secrets "${namespace}" || return 1
+         ensureHueSecrets "${namespace}" || return 1
+         ensureAdminSecrets "${namespace}" || return 1
+         components=(krb5kdc zookeeper hadoop-namenode cassandra mysql)
+         if [ "${HIVECTL_WAREHOUSE_RANGER:-1}" = "1" ]; then
+            components+=(ranger)
+         fi
+         components+=(hivemetastore hiveserver2 trino hue)
+         ;;
       *)
          components=(hadoop mysql hivemetastore hiveserver2)
          ;;
@@ -2363,7 +2417,7 @@ function startStack(){
 function ensureHuePortForwardsForActiveProfiles(){
    local ns=""
 
-   for ns in standalone mini llap secure; do
+   for ns in standalone mini llap secure warehouse; do
       profileHasHue "${ns}" || continue
       kubectl get namespace "${ns}" >/dev/null 2>&1 || continue
       kubectl get svc hue -n "${ns}" >/dev/null 2>&1 || continue
@@ -2407,6 +2461,15 @@ function stopStack(){
             components+=(ranger)
          fi
          components+=(mysql hadoop-namenode krb5kdc)
+         ;;
+      warehouse)
+         # Reverse of startStack: Hue -> Trino -> HS2 -> HMS -> Ranger -> MySQL -> Cassandra -> Hadoop/ZK -> KDC
+         components=(hue trino hiveserver2 hivemetastore)
+         overlayActive "warehouse_ranger"
+         if [ $? -eq 0 ]; then
+            components+=(ranger)
+         fi
+         components+=(mysql cassandra hadoop-namenode zookeeper krb5kdc)
          ;;
       *)
          components=(hiveserver2 hivemetastore mysql hadoop)
