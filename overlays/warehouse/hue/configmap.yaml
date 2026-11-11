@@ -161,3 +161,8 @@ data:
     name=Trino
     interface=sqlalchemy
     options='{"url": "trino://hue@trino.warehouse.svc.cluster.local:8080/hive/default"}'
+    # Cassandra via Trino's cassandra catalog (password node, demo keyspace)
+    [[[trino-cassandra]]]
+    name=Trino Cassandra
+    interface=sqlalchemy
+    options='{"url": "trino://hue@trino.warehouse.svc.cluster.local:8080/cassandra/demo"}'

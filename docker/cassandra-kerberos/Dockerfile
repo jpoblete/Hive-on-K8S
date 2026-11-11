@@ -40,6 +40,9 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint-krb5.sh
 # Kerberos CQL client for troubleshooting (stock cqlsh cannot do GSSAPI).
 COPY cql-krb.py /usr/local/bin/cql-krb.py
 RUN chmod 0755 /usr/local/bin/cql-krb.py
+# Wrapper so DDL/DML can be run as `cql.sh "<statement>"` or `cql.sh -f file.cql`.
+COPY cql.sh /usr/local/bin/cql.sh
+RUN chmod 0755 /usr/local/bin/cql.sh
 USER cassandra
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint-krb5.sh"]
 CMD ["cassandra", "-f"]
