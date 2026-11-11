@@ -58,7 +58,9 @@ spec:
             exec:
               command: ["/bin/bash", "-ec", "nodetool status | grep -q '^UN'"]
             initialDelaySeconds: 60
-            periodSeconds: 15
+            # nodetool takes ~1s (JVM startup); the default 1s timeout always fails.
+            timeoutSeconds: 10
+            periodSeconds: 20
             failureThreshold: 6
           livenessProbe:
             tcpSocket:
