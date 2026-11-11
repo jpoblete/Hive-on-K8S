@@ -98,7 +98,7 @@ minikube
 
 ## Hardware Requirements
 
-The manifests define resource requests and limits for local Kubernetes labs. The sizes below assume **one profile (overlay) running at a time** — do not start `standalone`, `mini`, `llap`, and `secure` together on the same cluster. Each profile uses its own namespace and PVCs, but they still compete for **the same Docker Desktop / kind VM memory and disk** (duplicate **~1.5 GiB** `apache/hive` / **~1.2 GiB** `apache/hadoop` pulls per node, plus PVCs). Stop other profiles first: `./hiveCtl.sh stop <other>` (PVCs are kept). For **`llap`** and **`secure`**, treat **one active overlay** as required on a **~36 GB RAM** host with default Docker disk.
+The manifests define resource requests and limits for local Kubernetes labs. The sizes below assume **one profile (overlay) running at a time** — do not start `standalone`, `mini`, `llap`, `secure`, and `warehouse` together on the same cluster. Each profile uses its own namespace and PVCs, but they still compete for **the same Docker Desktop / kind VM memory and disk** (duplicate **~1.5 GiB** `apache/hive` / **~1.2 GiB** `apache/hadoop` pulls per node, plus PVCs). Stop other profiles first: `./hiveCtl.sh stop <other>` (PVCs are kept). For **`llap`** and **`secure`**, treat **one active overlay** as required on a **~36 GB RAM** host with default Docker disk.
 
 For the `mini` profile, a cluster with **3 worker nodes** is suggested so Hadoop, MySQL, Metastore, and HiveServer2 have room to schedule cleanly across the local cluster.
 
@@ -130,13 +130,20 @@ secure only:
   CPUs:            8+
   disk:            50 GB+ host Docker VM (see below; PVCs alone are ~51 Gi on secure)
   worker nodes:    3+ for DataNodes; 2+ labeled llap (same as llap profile) for LLAP daemons
+
+warehouse only (estimate; not yet measured end to end):
+  host RAM:        40 GB+
+  Kubernetes RAM:  32-36 GB+
+  CPUs:            10+
+  disk:            60 GB+ host Docker VM (secure PVCs plus 4 Cassandra PVCs)
+  worker nodes:    3+ for DataNodes; schedulable room for 3 Cassandra + Trino (1 coordinator, 2 workers)
 ```
 
-**`secure`** is **`llap` + Kerberos** (same ZooKeeper, **2×** Metastore / HiveServer2 / LLAP daemon, and Hue; HDFS **1 NN + 3 DN**; realm **`SECURE.LAB`**). Only **`llap`** *or* **`secure`** should be up on a lab sized for the rows above — not both.
+**`secure`** is **`llap` + Kerberos** (same ZooKeeper, **2×** Metastore / HiveServer2 / LLAP daemon, and Hue; HDFS **1 NN + 3 DN**; realm **`SECURE.LAB`**). **`warehouse`** is the `secure` stack plus Cassandra and Trino (realm **`WAREHOUSE.LAB`**). Only one of **`llap`**, **`secure`**, or **`warehouse`** should be up on a lab sized for the rows above.
 
 With kind on Docker Desktop, every node is a container in the **same** VM: **`df` on each node reflects one shared virtual disk**, not six independent disks. Adding workers spreads pods; it does not add RAM or disk. Give Docker Desktop **enough memory** for the profile and **≥100 GiB disk** if you run **`llap`** or **`secure`** with **`apache/hive:nightly`**. Before large starts: `./hiveCtl.sh disk` (auto-prunes unused images when **`/var`** is above **90%**).
 
-Container limits are above JVM heap (overhead + native memory): Hive **3 Gi**, Hadoop **6 Gi**, MySQL **2 Gi**, LLAP daemon **5 Gi**, ZooKeeper **512 Mi**, Hue **2 Gi**.
+Container limits are above JVM heap (overhead + native memory): Hive **3 Gi**, Hadoop **6 Gi**, MySQL **2 Gi**, LLAP daemon **5 Gi**, ZooKeeper **512 Mi**, Hue **2 Gi**. Cassandra and Trino limits for **`warehouse`** are set in `overlays/warehouse/cassandra` and `overlays/warehouse/trino`.
 
 ## hiveCtl quick reference
 
