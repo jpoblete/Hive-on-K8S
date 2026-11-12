@@ -27,7 +27,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: cassandra
-          image: hive-on-k8s/cassandra-kerberos:4.1.12
+          image: jpoblete73/cassandra-kerberos:4.1.12
           ports:
             - name: cql
               containerPort: 9042
