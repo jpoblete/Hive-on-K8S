@@ -28,7 +28,7 @@ spec:
       initContainers:
         - name: copy-cassandra-config
           image: jpoblete73/cassandra-kerberos:4.1.12
-          command: ["sh", "-c", "cp -a /etc/cassandra/. /seed/ && cp /config/* /seed/ && chown -R 999:999 /seed"]
+          command: ["sh", "-c", "cp -r /etc/cassandra/. /seed/ && cp /config/* /seed/ && chown -R 999:999 /seed"]
           volumeMounts:
             - name: cassandra-config
               mountPath: /config
