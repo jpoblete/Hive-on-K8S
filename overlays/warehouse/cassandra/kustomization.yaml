@@ -13,6 +13,7 @@ configMapGenerator:
       disableNameSuffixHash: true
     files:
       - cassandra.yaml=cassandra.yaml
+      - cassandra-rackdc.properties=cassandra-rackdc.properties
   - name: kerberos-client
     options:
       disableNameSuffixHash: true

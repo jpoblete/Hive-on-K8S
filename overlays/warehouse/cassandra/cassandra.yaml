@@ -20,7 +20,7 @@ seed_provider:
   - class_name: org.apache.cassandra.locator.SimpleSeedProvider
     parameters:
       - seeds: "cassandra-0.cassandra-headless.warehouse.svc.cluster.local"
-endpoint_snitch: SimpleSnitch
+endpoint_snitch: GossipingPropertyFileSnitch
 authenticator: com.instaclustr.cassandra.auth.KerberosAuthenticator
 authorizer: AllowAllAuthorizer
 role_manager: CassandraRoleManager
