@@ -27,14 +27,14 @@ spec:
       terminationGracePeriodSeconds: 120
       initContainers:
         - name: copy-cassandra-config
-          image: busybox:1.36
-          command: ["sh", "-c", "cp /config/* /etc/cassandra/ && chown -R 999:999 /etc/cassandra"]
+          image: jpoblete73/cassandra-kerberos:4.1.12
+          command: ["sh", "-c", "cp -a /etc/cassandra/. /seed/ && cp /config/* /seed/ && chown -R 999:999 /seed"]
           volumeMounts:
             - name: cassandra-config
               mountPath: /config
               readOnly: true
             - name: cassandra-conf
-              mountPath: /etc/cassandra
+              mountPath: /seed
       containers:
         - name: cassandra
           image: jpoblete73/cassandra-kerberos:4.1.12
