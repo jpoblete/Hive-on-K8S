@@ -76,11 +76,9 @@ spec:
             - name: cassandra-config
               mountPath: /etc/cassandra/cassandra.yaml
               subPath: cassandra.yaml
-              readOnly: true
             - name: cassandra-config
               mountPath: /etc/cassandra/cassandra-rackdc.properties
               subPath: cassandra-rackdc.properties
-              readOnly: true
             - name: kerberos-config
               mountPath: /etc/krb5.conf
               subPath: krb5.conf
