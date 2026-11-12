@@ -43,7 +43,6 @@ trickle_fsync_interval: 10240KiB
 storage_port: 7000
 ssl_storage_port: 7001
 listen_address: ''
-listen_interface: eth0
 start_native_transport: true
 native_transport_port: 9042
 native_transport_allow_older_protocols: true
