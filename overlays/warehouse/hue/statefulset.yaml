@@ -44,7 +44,7 @@ spec:
               mountPath: /config
               readOnly: true
         - name: hue-migrate
-          image: hive-on-k8s/hue-trino:latest
+          image: gethue/hue:latest
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 0
@@ -88,7 +88,7 @@ spec:
               readOnly: true
       containers:
         - name: hue
-          image: hive-on-k8s/hue-trino:latest
+          image: gethue/hue:latest
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash", "/config/entrypoint.sh"]
           ports:
