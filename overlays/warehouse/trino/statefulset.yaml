@@ -6,6 +6,9 @@ kind: StatefulSet
 metadata:
   name: trino-coordinator
   namespace: warehouse
+  labels:
+    app: trino
+    role: coordinator
 spec:
   serviceName: trino-headless
   replicas: 1
