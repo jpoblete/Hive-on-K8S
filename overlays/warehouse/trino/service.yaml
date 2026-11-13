@@ -4,6 +4,9 @@ metadata:
   name: trino
   namespace: warehouse
 spec:
+  # NodePort so the Trino UI is reachable through the bastion host (34.234.33.208:30080).
+  # Only the coordinator is selected, so the UI is served by the coordinator.
+  type: NodePort
   selector:
     app: trino
     role: coordinator
@@ -11,6 +14,7 @@ spec:
     - name: http
       port: 8080
       targetPort: 8080
+      nodePort: 30080
 ---
 apiVersion: v1
 kind: Service
