@@ -29,5 +29,6 @@ configMapGenerator:
       - hive.properties
       - iceberg.properties
       - cassandra.properties
+      - mysql_bigdata.properties
 generatorOptions:
   disableNameSuffixHash: true

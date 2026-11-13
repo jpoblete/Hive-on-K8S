@@ -35,6 +35,8 @@ spec:
               cp /etc/trino-catalog-src/cassandra.properties /usr/lib/trino/etc/catalog/cassandra.properties &&
               cp /etc/trino-catalog-src/hive.properties /usr/lib/trino/etc/catalog/hive.properties &&
               cp /etc/trino-catalog-src/iceberg.properties /usr/lib/trino/etc/catalog/iceberg.properties &&
+              cp /etc/trino-catalog-src/mysql_bigdata.properties /usr/lib/trino/etc/catalog/mysql_bigdata.properties &&
+              printf 'connection-password=%s\n' "$(cat /etc/trino/mysql-creds/password)" >> /usr/lib/trino/etc/catalog/mysql_bigdata.properties &&
               printf 'cassandra.username=%s\ncassandra.password=%s\ncassandra.tls.keystore-password=%s\ncassandra.tls.truststore-password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" "$(cat /etc/trino/cassandra-tls/keystore.password)" "$(cat /etc/trino/cassandra-tls/truststore.password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
               exec /usr/lib/trino/bin/launcher run
           ports:
@@ -71,6 +73,9 @@ spec:
             - name: cassandra-creds
               mountPath: /etc/trino/cassandra-creds
               readOnly: true
+            - name: mysql-creds
+              mountPath: /etc/trino/mysql-creds
+              readOnly: true
             - name: cassandra-tls
               mountPath: /etc/trino/cassandra-tls
               readOnly: true
@@ -99,6 +104,13 @@ spec:
         - name: cassandra-creds
           secret:
             secretName: cassandra-pw-trino
+            defaultMode: 0440
+        - name: mysql-creds
+          secret:
+            secretName: hive-credentials
+            items:
+              - key: mysql-trino-password
+                path: password
             defaultMode: 0440
         - name: cassandra-tls
           secret:
@@ -140,6 +152,8 @@ spec:
               cp /etc/trino-catalog-src/cassandra.properties /usr/lib/trino/etc/catalog/cassandra.properties &&
               cp /etc/trino-catalog-src/hive.properties /usr/lib/trino/etc/catalog/hive.properties &&
               cp /etc/trino-catalog-src/iceberg.properties /usr/lib/trino/etc/catalog/iceberg.properties &&
+              cp /etc/trino-catalog-src/mysql_bigdata.properties /usr/lib/trino/etc/catalog/mysql_bigdata.properties &&
+              printf 'connection-password=%s\n' "$(cat /etc/trino/mysql-creds/password)" >> /usr/lib/trino/etc/catalog/mysql_bigdata.properties &&
               printf 'cassandra.username=%s\ncassandra.password=%s\ncassandra.tls.keystore-password=%s\ncassandra.tls.truststore-password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" "$(cat /etc/trino/cassandra-tls/keystore.password)" "$(cat /etc/trino/cassandra-tls/truststore.password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
               exec /usr/lib/trino/bin/launcher run
           ports:
@@ -176,6 +190,9 @@ spec:
             - name: cassandra-creds
               mountPath: /etc/trino/cassandra-creds
               readOnly: true
+            - name: mysql-creds
+              mountPath: /etc/trino/mysql-creds
+              readOnly: true
             - name: cassandra-tls
               mountPath: /etc/trino/cassandra-tls
               readOnly: true
@@ -204,6 +221,13 @@ spec:
         - name: cassandra-creds
           secret:
             secretName: cassandra-pw-trino
+            defaultMode: 0440
+        - name: mysql-creds
+          secret:
+            secretName: hive-credentials
+            items:
+              - key: mysql-trino-password
+                path: password
             defaultMode: 0440
         - name: cassandra-tls
           secret:
