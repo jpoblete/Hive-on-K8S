@@ -161,8 +161,3 @@ data:
     name=Trino
     interface=trino
     options='{"url": "http://trino.warehouse.svc.cluster.local:8080", "trino_user": "hue", "catalog": "hive", "schema": "default"}'
-    # Cassandra via Trino's cassandra catalog (password node, demo keyspace)
-    [[[trino-cassandra]]]
-    name=Trino Cassandra
-    interface=trino
-    options='{"url": "http://trino.warehouse.svc.cluster.local:8080", "trino_user": "hue", "catalog": "cassandra", "schema": "demo"}'
