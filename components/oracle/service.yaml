@@ -1,0 +1,18 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle
+  namespace: default
+  labels:
+    app: oracle
+spec:
+  type: ClusterIP
+  selector:
+    app: oracle
+  ports:
+  - port: 1521
+    targetPort: 1521
+    name: oracle
+    protocol: TCP
