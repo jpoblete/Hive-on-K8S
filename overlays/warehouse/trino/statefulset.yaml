@@ -67,6 +67,9 @@ spec:
             - name: cassandra-creds
               mountPath: /etc/trino/cassandra-creds
               readOnly: true
+            - name: cassandra-tls
+              mountPath: /etc/trino/cassandra-tls
+              readOnly: true
       volumes:
         - name: catalog-live
           emptyDir: {}
@@ -89,6 +92,10 @@ spec:
         - name: cassandra-creds
           secret:
             secretName: cassandra-pw-trino
+            defaultMode: 0440
+        - name: cassandra-tls
+          secret:
+            secretName: trino-cassandra-tls
             defaultMode: 0440
 ---
 apiVersion: apps/v1
@@ -158,6 +165,9 @@ spec:
             - name: cassandra-creds
               mountPath: /etc/trino/cassandra-creds
               readOnly: true
+            - name: cassandra-tls
+              mountPath: /etc/trino/cassandra-tls
+              readOnly: true
       volumes:
         - name: catalog-live
           emptyDir: {}
@@ -180,4 +190,8 @@ spec:
         - name: cassandra-creds
           secret:
             secretName: cassandra-pw-trino
+            defaultMode: 0440
+        - name: cassandra-tls
+          secret:
+            secretName: trino-cassandra-tls
             defaultMode: 0440
