@@ -66,7 +66,7 @@ dynamic_snitch_update_interval: 100ms
 dynamic_snitch_reset_interval: 600000ms
 dynamic_snitch_badness_threshold: 1.0
 authenticator: PasswordAuthenticator
-authorizer: AllowAllAuthorizer
+authorizer: CassandraAuthorizer
 role_manager: CassandraRoleManager
 network_authorizer: AllowAllNetworkAuthorizer
 roles_validity: 2000ms
