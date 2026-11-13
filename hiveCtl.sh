@@ -499,6 +499,10 @@ function overlayWebUiNodePort(){
       ranger)
          np="$(kubectl get svc ranger -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null)"
          ;;
+      trino)
+         # Trino coordinator UI (NodePort 30080, served by the coordinator; reachable via the bastion)
+         np="$(kubectl get svc trino -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}' 2>/dev/null)"
+         ;;
       hive)
          # standalone profile: Service hiveserver2 (all-in-one StatefulSet app=hive)
          np="$(kubectl get svc hiveserver2 -n "${namespace}" -o jsonpath='{.spec.ports[?(@.name=="webui")].nodePort}' 2>/dev/null)"
