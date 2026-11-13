@@ -169,6 +169,37 @@ GROUP BY p1;
 
 Transactional table: `TBLPROPERTIES ('transactional'='true')`.
 
+### Executed SQL queries
+
+**ACID 1 — DELETE (row removal across partitions, 1,000 rows affected)**
+
+```sql
+DELETE FROM default.orc_acid
+WHERE c1 % 10 = 0;
+```
+
+**ACID 2 — UPDATE (partition-pruned predicate, 0 rows affected)**
+
+```sql
+UPDATE default.orc_acid
+SET c2 = CONCAT(c2, '_updated')
+WHERE p1 = 1;
+```
+
+**ACID 3 — SELECT across deltas (reconciling base ORC + delete deltas)**
+
+```sql
+SELECT p1,
+       c1 % 100 AS bucket_group,
+       COUNT(1) AS active_rows,
+       AVG(LENGTH(c2)) AS avg_len
+FROM default.orc_acid
+GROUP BY p1, c1 % 100
+LIMIT 100;
+```
+
+### Results
+
 | Step | Operation | DAG time | Client / wall | Rows |
 | --- | --- | --- | --- | --- |
 | Hydrate | `INSERT … SELECT` into ACID table | 3.41 s | 8.848 s | 10,000 |
