@@ -26,9 +26,6 @@ GRANT CREATE SESSION TO trino;
 GRANT UNLIMITED TABLESPACE TO bigdata;
 GRANT CREATE TABLE TO bigdata;
 
--- trino: read/write on objects owned by bigdata only.
-GRANT SELECT, INSERT, UPDATE, DELETE ON bigdata.sample_customers TO trino;
-
 -- Sample table (owned by the bigdata schema user). Idempotent.
 DECLARE
   n NUMBER;
@@ -43,3 +40,7 @@ BEGIN
   END IF;
 END;
 /
+
+-- trino: read/write on objects owned by bigdata only. Granted AFTER the table exists
+-- (a GRANT on a missing object fails and would leave trino with no access on a fresh run).
+GRANT SELECT, INSERT, UPDATE, DELETE ON bigdata.sample_customers TO trino;
