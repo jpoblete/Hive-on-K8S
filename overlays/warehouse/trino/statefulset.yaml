@@ -103,7 +103,7 @@ spec:
             defaultMode: 0440
         - name: hdfs-config
           configMap:
-            name: hivemetastore
+            name: trino-hdfs
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -208,4 +208,4 @@ spec:
             defaultMode: 0440
         - name: hdfs-config
           configMap:
-            name: hivemetastore
+            name: trino-hdfs

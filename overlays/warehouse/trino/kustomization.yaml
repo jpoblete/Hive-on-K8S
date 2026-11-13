@@ -20,6 +20,9 @@ configMapGenerator:
       - config.properties=config-worker.properties
       - jvm.config
       - node.properties
+  - name: trino-hdfs
+    files:
+      - core-site.xml=hdfs/core-site.xml
   - name: trino-catalogs
     files:
       - hive.properties

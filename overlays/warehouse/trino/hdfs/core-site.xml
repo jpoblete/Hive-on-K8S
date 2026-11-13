@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Usage Notice: This project is not meant for commercial use without permission and proper credit.
+  Author: j.martinez.poblete@gmail.com
+  Trino's copy of the warehouse core-site.xml. Identical to hivemetastore/core-site.xml except for
+  hadoop.security.auth_to_local, which maps the trino/* Kerberos principal to the short name "trino".
+  Hive's copy is intentionally left unchanged.
+-->
+<configuration>
+   <property>
+      <name>fs.defaultFS</name>
+      <value>hdfs://nameservice:8020</value>
+   </property>
+   <property>
+      <name>hadoop.security.authentication</name>
+      <value>kerberos</value>
+   </property>
+   <property>
+      <name>hadoop.security.authorization</name>
+      <value>true</value>
+   </property>
+   <property>
+      <name>hadoop.security.auth_to_local</name>
+      <value>
+RULE:[2:$1/$2@$0](trino/.*@WAREHOUSE\.LAB)s/.*/trino/
+RULE:[2:$1@$0](trino@WAREHOUSE\.LAB)s/.*/trino/
+RULE:[1:$1@$0](.*@WAREHOUSE\.LAB)s/@.*//
+DEFAULT
+      </value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hive.hosts</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hive.groups</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hue.hosts</name>
+      <value>*</value>
+   </property>
+   <property>
+      <name>hadoop.proxyuser.hue.groups</name>
+      <value>*</value>
+   </property>
+</configuration>
