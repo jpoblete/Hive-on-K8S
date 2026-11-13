@@ -28,6 +28,8 @@ TBL_COLS="${3:-2}"
 ROW_PART="${4:-10}"
 ITERATIONS="${5:-10}"
 KS_RF="${KS_RF:-3}"
+KS_RF_TRINO="${KS_RF_TRINO:-1}"
+ROW_SEQ=0
 CQL_SH="${CQL_SH:-cql.sh}"
 TIMESTAMP=$(date "+%s")
 CQL_FILE="/tmp/createCassandraTable.${TIMESTAMP}.cql"
@@ -109,8 +111,8 @@ genRandomStr() {
 
 # CREATE KEYSPACE if it does not exist. Replication is SimpleStrategy with KS_RF.
 createKeyspace() {
-   printf "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': %s};\n" \
-      "${KEYSPACE}" "${KS_RF}"
+   printf "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'NetworkTopologyStrategy', 'warehouse': %s, 'trino': %s};\n" \
+      "${KEYSPACE}" "${KS_RF}" "${KS_RF_TRINO}"
 }
 
 # Drop the table so CREATE is not a silent no-op on an old schema (matches createTable.sh dropTbl).
@@ -153,7 +155,10 @@ genData() {
    done
 
    for ((r=1; r<=ROW_PART; r++)); do
-      vals=("${r}" "$(genUuid)")
+      # c1 is the primary key: use a global running counter so rows in later
+      # batches do not overwrite earlier ones (row index alone restarts per batch).
+      ROW_SEQ=$((ROW_SEQ + 1))
+      vals=("${ROW_SEQ}" "$(genUuid)")
       for ((i=3; i<=TBL_COLS; i++)); do
          vals+=("'$(genRandomStr 15)'")
       done
