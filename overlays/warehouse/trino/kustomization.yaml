@@ -31,5 +31,6 @@ configMapGenerator:
       - cassandra.properties
       - mysql.properties
       - postgres.properties
+      - oracle.properties
 generatorOptions:
   disableNameSuffixHash: true

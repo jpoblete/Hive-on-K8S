@@ -39,6 +39,8 @@ spec:
               printf 'connection-password=%s\n' "$(cat /etc/trino/mysql-creds/password)" >> /usr/lib/trino/etc/catalog/mysql.properties &&
               cp /etc/trino-catalog-src/postgres.properties /usr/lib/trino/etc/catalog/postgres.properties &&
               printf 'connection-password=%s\n' "$(cat /etc/trino/postgres-creds/password)" >> /usr/lib/trino/etc/catalog/postgres.properties &&
+              cp /etc/trino-catalog-src/oracle.properties /usr/lib/trino/etc/catalog/oracle.properties &&
+              printf 'connection-password=%s\n' "$(cat /etc/trino/oracle-creds/password)" >> /usr/lib/trino/etc/catalog/oracle.properties &&
               printf 'cassandra.username=%s\ncassandra.password=%s\ncassandra.tls.keystore-password=%s\ncassandra.tls.truststore-password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" "$(cat /etc/trino/cassandra-tls/keystore.password)" "$(cat /etc/trino/cassandra-tls/truststore.password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
               exec /usr/lib/trino/bin/launcher run
           ports:
@@ -81,6 +83,9 @@ spec:
             - name: postgres-creds
               mountPath: /etc/trino/postgres-creds
               readOnly: true
+            - name: oracle-creds
+              mountPath: /etc/trino/oracle-creds
+              readOnly: true
             - name: cassandra-tls
               mountPath: /etc/trino/cassandra-tls
               readOnly: true
@@ -122,6 +127,13 @@ spec:
             secretName: hive-credentials
             items:
               - key: postgres-trino-password
+                path: password
+            defaultMode: 0440
+        - name: oracle-creds
+          secret:
+            secretName: hive-credentials
+            items:
+              - key: oracle-trino-password
                 path: password
             defaultMode: 0440
         - name: cassandra-tls
@@ -168,6 +180,8 @@ spec:
               printf 'connection-password=%s\n' "$(cat /etc/trino/mysql-creds/password)" >> /usr/lib/trino/etc/catalog/mysql.properties &&
               cp /etc/trino-catalog-src/postgres.properties /usr/lib/trino/etc/catalog/postgres.properties &&
               printf 'connection-password=%s\n' "$(cat /etc/trino/postgres-creds/password)" >> /usr/lib/trino/etc/catalog/postgres.properties &&
+              cp /etc/trino-catalog-src/oracle.properties /usr/lib/trino/etc/catalog/oracle.properties &&
+              printf 'connection-password=%s\n' "$(cat /etc/trino/oracle-creds/password)" >> /usr/lib/trino/etc/catalog/oracle.properties &&
               printf 'cassandra.username=%s\ncassandra.password=%s\ncassandra.tls.keystore-password=%s\ncassandra.tls.truststore-password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" "$(cat /etc/trino/cassandra-tls/keystore.password)" "$(cat /etc/trino/cassandra-tls/truststore.password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
               exec /usr/lib/trino/bin/launcher run
           ports:
@@ -210,6 +224,9 @@ spec:
             - name: postgres-creds
               mountPath: /etc/trino/postgres-creds
               readOnly: true
+            - name: oracle-creds
+              mountPath: /etc/trino/oracle-creds
+              readOnly: true
             - name: cassandra-tls
               mountPath: /etc/trino/cassandra-tls
               readOnly: true
@@ -251,6 +268,13 @@ spec:
             secretName: hive-credentials
             items:
               - key: postgres-trino-password
+                path: password
+            defaultMode: 0440
+        - name: oracle-creds
+          secret:
+            secretName: hive-credentials
+            items:
+              - key: oracle-trino-password
                 path: password
             defaultMode: 0440
         - name: cassandra-tls
