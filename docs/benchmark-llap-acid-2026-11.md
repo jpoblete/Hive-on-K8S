@@ -220,8 +220,3 @@ LIMIT 100;
 The **secure** BigData-on-K8S stack showed sensible LLAP cache hits, partition pruning, ACID mutations, and controlled spill under an extreme windowed join. Kerberos did not dominate these timings.
 
 **Operational note:** Very large analytic window frames can force sort spills and long reducer phases; keep window history bounds modest for predictable behaviour.
-
-### Possible follow-ups
-
-- Load **~1,000,000** rows into the ACID table to stress compaction.
-- Parallel UPDATE/DELETE sessions to observe lock behaviour under contention.
