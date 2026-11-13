@@ -1,0 +1,17 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Headless service for the trino DC node (ordinal DNS). Trino connects to cassandra-trino-0.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra-trino-headless
+  namespace: warehouse
+spec:
+  clusterIP: None
+  selector:
+    app: cassandra-trino
+  ports:
+    - name: cql
+      port: 9042
+    - name: intra
+      port: 7000

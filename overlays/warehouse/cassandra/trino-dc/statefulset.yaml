@@ -1,0 +1,103 @@
+# Usage Notice: This project is not meant for commercial use without permission and proper credit.
+# Author: j.martinez.poblete@gmail.com
+# Single-node Cassandra DC for Trino: DC "trino", RF=1, Trino-facing, mutual TLS.
+# Cluster name matches the warehouse ring so the nodes can gossip together.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cassandra-trino
+  namespace: warehouse
+  labels:
+    app: cassandra-trino
+spec:
+  serviceName: cassandra-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cassandra-trino
+  template:
+    metadata:
+      labels:
+        app: cassandra-trino
+    spec:
+      serviceAccountName: cassandra
+      automountServiceAccountToken: false
+      setHostnameAsFQDN: true
+      securityContext:
+        fsGroup: 999
+      terminationGracePeriodSeconds: 120
+      initContainers:
+        - name: copy-cassandra-config
+          image: jpoblete73/cassandra-kerberos:4.1.12
+          command: ["sh", "-c", "cp -r /etc/cassandra/. /seed/ && cp /config/* /seed/ && sed -i \"s|\\${TLS_KEYSTORE_PASSWORD}|$(cat /tlssecret/keystore.password)|; s|\\${TLS_TRUSTSTORE_PASSWORD}|$(cat /tlssecret/truststore.password)|\" /seed/cassandra.yaml"]
+          volumeMounts:
+            - name: cassandra-config
+              mountPath: /config
+              readOnly: true
+            - name: cassandra-conf
+              mountPath: /seed
+            - name: cassandra-trino-tls
+              mountPath: /tlssecret
+              readOnly: true
+      containers:
+        - name: cassandra
+          image: jpoblete73/cassandra-kerberos:4.1.12
+          ports:
+            - name: cql
+              containerPort: 9042
+            - name: intra
+              containerPort: 7000
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MAX_HEAP_SIZE
+              value: 1024M
+            - name: HEAP_NEWSIZE
+              value: 256M
+            - name: KRB5_CONFIG
+              value: /etc/krb5.conf
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cassandra
+            - name: cassandra-conf
+              mountPath: /etc/cassandra
+            - name: cassandra-trino-tls
+              mountPath: /etc/cassandra/tls
+              readOnly: true
+            - name: kerberos-config
+              mountPath: /etc/krb5.conf
+              subPath: krb5.conf
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["/bin/bash", "-ec", "nodetool status | grep -q '^UN'"]
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 6
+            timeoutSeconds: 10
+      volumes:
+        - name: cassandra-conf
+          emptyDir: {}
+        - name: cassandra-config
+          configMap:
+            name: cassandra-config-trino
+        - name: cassandra-trino-tls
+          secret:
+            secretName: cassandra-trino-tls
+            defaultMode: 288
+        - name: kerberos-config
+          configMap:
+            name: kerberos-client
+            items:
+              - key: krb5.conf
+                path: krb5.conf
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
