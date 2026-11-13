@@ -535,9 +535,15 @@ function overlayComponentState(){
    local desired=""
    local not_ready_pods=""
 
-   if kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
-      desired="$(kubectl get statefulset "${service}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
-      ready="$(kubectl get statefulset "${service}" -n "${namespace}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
+   # Workloads named like the component (cassandra, hue, ...) match by name. Others (e.g. trino-coordinator
+   # labelled app=trino) are found by their app label.
+   local sts_name="${service}"
+   if ! kubectl get statefulset "${service}" -n "${namespace}" >/dev/null 2>&1; then
+      sts_name="$(kubectl get statefulset -n "${namespace}" -l "app=${service}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+   fi
+   if [ -n "${sts_name}" ] && kubectl get statefulset "${sts_name}" -n "${namespace}" >/dev/null 2>&1; then
+      desired="$(kubectl get statefulset "${sts_name}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
+      ready="$(kubectl get statefulset "${sts_name}" -n "${namespace}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
    elif kubectl get deployment "${service}" -n "${namespace}" >/dev/null 2>&1; then
       desired="$(kubectl get deployment "${service}" -n "${namespace}" -o jsonpath='{.spec.replicas}' 2>/dev/null)"
       ready="$(kubectl get deployment "${service}" -n "${namespace}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
@@ -2146,8 +2152,14 @@ function warnIfNoLlapNodes(){
    local count=""
    count="$(kubectl get nodes -l node-role.kubernetes.io/llap --no-headers 2>/dev/null | wc -l | tr -d ' ')"
    if [ "${count:-0}" = "0" ]; then
-      echo "Warning: no node labeled node-role.kubernetes.io/llap; llapdaemon pods will stay Pending." >&2
-      echo "         Label LLAP workers: kubectl label node <node> node-role.kubernetes.io/llap=" >&2
+      # Label every non-control-plane node as an LLAP worker so llapdaemon pods can schedule.
+      echo "No node labeled node-role.kubernetes.io/llap; labeling worker nodes."
+      kubectl get nodes --no-headers 2>/dev/null \
+         | awk '$3 !~ /control-plane/ {print $1}' \
+         | while read -r node; do
+              kubectl label node "${node}" node-role.kubernetes.io/llap= --overwrite >/dev/null 2>&1 \
+                 && echo "  labeled ${node}"
+           done
    fi
 }
 # Warehouse Cassandra image (4.1.12 + Instaclustr Kerberos authenticator); built from docker/cassandra-kerberos.
