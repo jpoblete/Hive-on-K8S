@@ -30,5 +30,6 @@ configMapGenerator:
       - iceberg.properties
       - cassandra.properties
       - mysql.properties
+      - postgres.properties
 generatorOptions:
   disableNameSuffixHash: true
