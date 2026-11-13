@@ -38,6 +38,46 @@ To limit skew from cached results, queries used non-deterministic constructs (e.
 | Format | ORC (vectorized) |
 | Partitioning | Column `p1` |
 
+### Dataset generation & DDL
+
+The baseline Iceberg/ORC external table was generated using `/opt/hive/setup/createTable.sh` inside `hiveserver2-0` (1,000 rows per partition × 10 random `p1` partitions = 10,000 rows):
+
+```bash
+cd /opt/hive/setup
+./createTable.sh ice_orc default.ice_orc_ext_3_1_10k 3 1 1000 10
+```
+
+**Generated External Iceberg DDL (`default.ice_orc_ext_3_1_10k`):**
+
+```sql
+CREATE EXTERNAL TABLE IF NOT EXISTS default.ice_orc_ext_3_1_10k (
+  c1 int,
+  c2 string,
+  c3 string
+)
+PARTITIONED BY (p1 int)
+STORED BY ICEBERG
+STORED AS ORC;
+```
+
+**Managed ACID Table DDL & Hydration (`default.ice_orc_acid`):**
+
+```sql
+CREATE TABLE IF NOT EXISTS default.ice_orc_acid (
+  c1 int,
+  c2 string,
+  c3 string
+)
+PARTITIONED BY (p1 int)
+CLUSTERED BY (c1) SORTED BY (c1 ASC) INTO 128 BUCKETS
+STORED AS ORC
+TBLPROPERTIES ('transactional'='true');
+
+INSERT INTO default.ice_orc_acid PARTITION (p1)
+SELECT c1, c2, c3, p1
+FROM default.ice_orc_ext_3_1_10k;
+```
+
 ### Execution configuration (ACID tests)
 
 ```sql
