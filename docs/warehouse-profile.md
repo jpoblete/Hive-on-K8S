@@ -14,7 +14,9 @@ The `warehouse` profile is a Kerberos-secured data warehouse in the `warehouse` 
 | ZooKeeper | SASL/Kerberos | overlay `overlays/warehouse/zookeeper` |
 | Cassandra (Kerberos ring) | 3 nodes, Kerberos-only auth | `hive-on-k8s/cassandra-kerberos:4.1.12` (custom, see below) |
 | Cassandra (password node) | 1 node, password auth, read by Trino | `hive-on-k8s/cassandra-password:4.1.12` (custom) |
-| MySQL | Hive metastore + Ranger DB | overlay `overlays/warehouse/mysql` |
+| MySQL | Hive metastore + Ranger DB, plus `bigdata` database for Trino | `mysql:8.4` (overlay `overlays/warehouse/mysql`) |
+| PostgreSQL | `bigdata` database (schema `bigdata`) for Trino | `postgres:16` (component `components/postgres`) |
+| Oracle | `bigdata` for Trino (schema under a user, see note) | version pending: one of 26ai, 23c, 23ai, 21c, 19.19, 19c |
 | Ranger | Admin (Hive policies) | overlay `overlays/warehouse/ranger` |
 | Hive | Metastore + HiveServer2 (Kerberos), LLAP | `apache/hive:nightly` |
 | Trino | 1 coordinator + 2 workers, Trino 484 | `trinodb/trino:484` |
