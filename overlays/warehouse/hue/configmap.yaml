@@ -159,10 +159,10 @@ data:
     interface=hiveserver2
     [[[trino]]]
     name=Trino
-    interface=sqlalchemy
-    options='{"url": "trino://hue@trino.warehouse.svc.cluster.local:8080/hive/default"}'
+    interface=trino
+    options='{"url": "http://trino.warehouse.svc.cluster.local:8080", "trino_user": "hue"}'
     # Cassandra via Trino's cassandra catalog (password node, demo keyspace)
     [[[trino-cassandra]]]
     name=Trino Cassandra
-    interface=sqlalchemy
-    options='{"url": "trino://hue@trino.warehouse.svc.cluster.local:8080/cassandra/demo"}'
+    interface=trino
+    options='{"url": "http://trino.warehouse.svc.cluster.local:8080", "trino_user": "hue", "catalog": "cassandra", "schema": "demo"}'
