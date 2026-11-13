@@ -33,7 +33,7 @@ To limit skew from cached results, queries used non-deterministic constructs (e.
 
 | Item | Value |
 | --- | --- |
-| Tables | `default.ice_orc_ext_3_1_10k` (external), `default.ice_orc_acid` (managed ACID) |
+| Tables | `default.ice_orc_ext_3_1_10k` (external), `default.orc_acid` (managed ACID) |
 | Row count | 10,000 baseline rows |
 | Format | ORC (vectorized) |
 | Partitioning | Column `p1` |
@@ -60,10 +60,10 @@ STORED BY ICEBERG
 STORED AS ORC;
 ```
 
-**Managed ACID Table DDL & Hydration (`default.ice_orc_acid`):**
+**Managed ACID Table DDL & Hydration (`default.orc_acid`):**
 
 ```sql
-CREATE TABLE IF NOT EXISTS default.ice_orc_acid (
+CREATE TABLE IF NOT EXISTS default.orc_acid (
   c1 int,
   c2 string,
   c3 string
@@ -73,7 +73,7 @@ CLUSTERED BY (c1) SORTED BY (c1 ASC) INTO 128 BUCKETS
 STORED AS ORC
 TBLPROPERTIES ('transactional'='true');
 
-INSERT INTO default.ice_orc_acid PARTITION (p1)
+INSERT INTO default.orc_acid PARTITION (p1)
 SELECT c1, c2, c3, p1
 FROM default.ice_orc_ext_3_1_10k;
 ```
