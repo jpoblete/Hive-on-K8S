@@ -16,7 +16,9 @@ The `warehouse` profile is a Kerberos-secured data warehouse in the `warehouse` 
 | Cassandra (password node) | 1 node, password auth, read by Trino | `hive-on-k8s/cassandra-password:4.1.12` (custom) |
 | MySQL | Hive metastore + Ranger DB, plus `bigdata` database for Trino | `mysql:8.4` (overlay `overlays/warehouse/mysql`) |
 | PostgreSQL | `bigdata` database (schema `bigdata`) for Trino | `postgres:16` (component `components/postgres`) |
-| Oracle | `bigdata` for Trino (schema under a user, see note) | version pending: one of 26ai, 23c, 23ai, 21c, 19.19, 19c |
+| Oracle | `bigdata` for Trino (user/schema `bigdata`, quoted in SQL) | `container-registry.oracle.com/database/free:23.9.0.0-amd64` (23ai Free, component `components/oracle`) |
+
+Trino database catalogs (MySQL, PostgreSQL, Oracle) and their setup are in [trino-database-catalogs.md](trino-database-catalogs.md).
 | Ranger | Admin (Hive policies) | overlay `overlays/warehouse/ranger` |
 | Hive | Metastore + HiveServer2 (Kerberos), LLAP | `apache/hive:nightly` |
 | Trino | 1 coordinator + 2 workers, Trino 484 | `trinodb/trino:484` |
