@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Environment** | Secure Hive-on-K8S (Kerberos enabled) |
+| **Environment** | Secure BigData-on-K8S (Kerberos enabled) |
 | **Author** | José Manuel Martínez Poblete |
 | **Date** | November 6, 2026 |
 
@@ -146,7 +146,7 @@ Transactional table: `TBLPROPERTIES ('transactional'='true')`.
 
 ## 5. Summary
 
-The **secure** Hive-on-K8S stack showed sensible LLAP cache hits, partition pruning, ACID mutations, and controlled spill under an extreme windowed join. Kerberos did not dominate these timings.
+The **secure** BigData-on-K8S stack showed sensible LLAP cache hits, partition pruning, ACID mutations, and controlled spill under an extreme windowed join. Kerberos did not dominate these timings.
 
 **Operational note:** Very large analytic window frames can force sort spills and long reducer phases; keep window history bounds modest for predictable behaviour.
 

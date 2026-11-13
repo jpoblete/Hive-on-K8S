@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# MODIFIED BY: j.martinez.poblete@gmail.com (Hive-on-K8S warehouse profile)
+# MODIFIED BY: j.martinez.poblete@gmail.com (BigData-on-K8S warehouse profile)
 # Custom image. Origin: gethue/hue:latest (upstream, unmodified base).
 # Purpose: Hue's bundled SQLAlchemy 1.3.8 cannot load sqlalchemy-trino, so this
 # layer upgrades SQLAlchemy to 1.4.x and installs sqlalchemy-trino into Hue's own venv.

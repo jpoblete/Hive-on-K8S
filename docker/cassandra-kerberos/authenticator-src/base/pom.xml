@@ -1,5 +1,5 @@
 <!-- Usage Notice: This project is not meant for commercial use without permission and proper credit. -->
-<!-- Author: j.martinez.poblete@gmail.com (build reactor for the Hive-on-K8S warehouse profile). Upstream: Instaclustr cassandra-kerberos base module. -->
+<!-- Author: j.martinez.poblete@gmail.com (build reactor for the BigData-on-K8S warehouse profile). Upstream: Instaclustr cassandra-kerberos base module. -->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>

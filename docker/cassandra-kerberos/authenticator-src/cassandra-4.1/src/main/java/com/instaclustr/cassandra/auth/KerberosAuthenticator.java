@@ -1,5 +1,5 @@
 /*
- * MODIFIED BY: j.martinez.poblete@gmail.com (Hive-on-K8S warehouse profile)
+ * MODIFIED BY: j.martinez.poblete@gmail.com (BigData-on-K8S warehouse profile)
  * Origin: Instaclustr cassandra-kerberos v4.1.0-1.0.0 (Apache-2.0 / Instaclustr license above, unchanged).
  * Changes by us, compiled into the cassandra-kerberos-4.1.12 jar:
  *   - Built against Cassandra 4.1.12 (upstream targets 4.1.0).
@@ -33,6 +33,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import org.apache.cassandra.auth.AuthCache;
 import org.apache.cassandra.auth.AuthCacheMBean;
+import org.apache.cassandra.auth.IAuthenticator.SaslNegotiator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -95,7 +96,7 @@ public class KerberosAuthenticator extends BaseKerberosAuthenticator
         final String saslProtocol = config.getKerberosPrincipalServiceNameComponent();
         final Map<String, String> saslProperties = ImmutableMap.<String, String>builder().put(Sasl.QOP, config.qop()).build();
 
-        return new KerberosSaslAuthenticator(saslProtocol, saslProperties)
+        final SaslNegotiator gssapi = new KerberosSaslAuthenticator(saslProtocol, saslProperties)
         {
 
             @Override
@@ -110,6 +111,9 @@ public class KerberosAuthenticator extends BaseKerberosAuthenticator
                 return FBUtilities.getBroadcastAddressAndPort().getAddress().getCanonicalHostName();
             }
         };
+
+        // GSSAPI unchanged; PLAIN accepted only for trino via the KDC password check.
+        return new DualMechanismNegotiator(gssapi);
     }
 
 

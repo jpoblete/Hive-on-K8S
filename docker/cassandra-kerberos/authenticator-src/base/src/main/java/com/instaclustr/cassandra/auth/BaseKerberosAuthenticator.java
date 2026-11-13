@@ -1,5 +1,5 @@
 /*
- * MODIFIED BY: j.martinez.poblete@gmail.com (Hive-on-K8S warehouse profile)
+ * MODIFIED BY: j.martinez.poblete@gmail.com (BigData-on-K8S warehouse profile)
  * Origin: Instaclustr cassandra-kerberos v4.1.0-1.0.0 base module (Apache-2.0; see upstream LICENSE).
  * This file is UNCHANGED from upstream v4.1.0-1.0.0. It is compiled as-is into the
  * cassandra-kerberos-4.1.12 jar (shaded into the 4.1 module). Not affiliated with or endorsed by Instaclustr.
