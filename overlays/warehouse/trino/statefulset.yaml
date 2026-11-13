@@ -71,6 +71,9 @@ spec:
             - name: cassandra-tls
               mountPath: /etc/trino/cassandra-tls
               readOnly: true
+            - name: hdfs-config
+              mountPath: /etc/trino/hdfs
+              readOnly: true
       volumes:
         - name: catalog-live
           emptyDir: {}
@@ -98,6 +101,9 @@ spec:
           secret:
             secretName: trino-cassandra-tls
             defaultMode: 0440
+        - name: hdfs-config
+          configMap:
+            name: hivemetastore
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -170,6 +176,9 @@ spec:
             - name: cassandra-tls
               mountPath: /etc/trino/cassandra-tls
               readOnly: true
+            - name: hdfs-config
+              mountPath: /etc/trino/hdfs
+              readOnly: true
       volumes:
         - name: catalog-live
           emptyDir: {}
@@ -197,3 +206,6 @@ spec:
           secret:
             secretName: trino-cassandra-tls
             defaultMode: 0440
+        - name: hdfs-config
+          configMap:
+            name: hivemetastore
