@@ -31,7 +31,7 @@ spec:
               ln -sf /etc/trino/keytab/${POD_NAME}.keytab /etc/trino/service.keytab &&
               cp /etc/trino-catalog-src/cassandra.properties /usr/lib/trino/etc/catalog/cassandra.properties &&
               cp /etc/trino-catalog-src/hive.properties /usr/lib/trino/etc/catalog/hive.properties &&
-              printf 'cassandra.username=%s\ncassandra.password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
+              printf 'cassandra.username=%s\ncassandra.password=%s\ncassandra.tls.keystore-password=%s\ncassandra.tls.truststore-password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" "$(cat /etc/trino/cassandra-tls/keystore.password)" "$(cat /etc/trino/cassandra-tls/truststore.password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
               exec /usr/lib/trino/bin/launcher run
           ports:
             - containerPort: 8080
@@ -129,7 +129,7 @@ spec:
               ln -sf /etc/trino/keytab/${POD_NAME}.keytab /etc/trino/service.keytab &&
               cp /etc/trino-catalog-src/cassandra.properties /usr/lib/trino/etc/catalog/cassandra.properties &&
               cp /etc/trino-catalog-src/hive.properties /usr/lib/trino/etc/catalog/hive.properties &&
-              printf 'cassandra.username=%s\ncassandra.password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
+              printf 'cassandra.username=%s\ncassandra.password=%s\ncassandra.tls.keystore-password=%s\ncassandra.tls.truststore-password=%s\n' "$(cat /etc/trino/cassandra-creds/username)" "$(cat /etc/trino/cassandra-creds/password)" "$(cat /etc/trino/cassandra-tls/keystore.password)" "$(cat /etc/trino/cassandra-tls/truststore.password)" >> /usr/lib/trino/etc/catalog/cassandra.properties &&
               exec /usr/lib/trino/bin/launcher run
           ports:
             - containerPort: 8080
