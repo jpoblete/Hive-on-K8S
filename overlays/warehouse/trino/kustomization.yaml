@@ -23,6 +23,7 @@ configMapGenerator:
   - name: trino-catalogs
     files:
       - hive.properties
+      - iceberg.properties
       - cassandra.properties
 generatorOptions:
   disableNameSuffixHash: true
