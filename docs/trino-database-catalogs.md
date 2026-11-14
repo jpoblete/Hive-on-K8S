@@ -56,9 +56,11 @@ Trino reads each catalog password from a Secret volume at startup and appends it
 4. Oracle: create the `oracle-registry` pull secret (see below), then `kubectl apply -k overlays/warehouse/oracle`, wait for the database to report `DATABASE IS READY TO USE`, then `bash components/oracle/setup/apply-bigdata-schema.sh`. Idempotent.
 5. Trino: `kubectl apply -k overlays/warehouse/trino`, then restart the coordinator and workers so the catalogs load.
 
-## Oracle image pull (`oracle-registry`)
+## Oracle image
 
-The Oracle image `container-registry.oracle.com/database/free` needs an authenticated pull. Create the secret with an Oracle **auth token**, not the account password:
+The StatefulSet uses `jpoblete73/oracle-free:23.9.0.0-amd64`, a copy of Oracle's `container-registry.oracle.com/database/free:23.9.0.0-amd64` hosted on Docker Hub. The copy means a new cluster pulls without an Oracle login.
+
+Only if you want to pull from Oracle's registry instead (for example to refresh the copy), the source needs an authenticated pull. Create the secret with an Oracle **auth token**, not the account password:
 
 ```bash
 kubectl -n warehouse create secret docker-registry oracle-registry \

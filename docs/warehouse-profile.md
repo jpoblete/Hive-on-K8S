@@ -19,6 +19,18 @@ The `warehouse` profile is a Kerberos-secured data warehouse in the `warehouse` 
 | Oracle | `bigdata` for Trino (user/schema `bigdata`, quoted in SQL) | `container-registry.oracle.com/database/free:23.9.0.0-amd64` (23ai Free, component `components/oracle`) |
 
 Trino database catalogs (MySQL, PostgreSQL, Oracle) and their setup are in [trino-database-catalogs.md](trino-database-catalogs.md).
+
+### Image sources (portability)
+
+Every image the warehouse namespace runs is public or hosted in this repo's Docker Hub account, so the stack deploys to another cluster without logins:
+
+| Image | Source |
+| --- | --- |
+| `apache/hadoop:3.4.1`, `apache/hive:nightly`, `gethue/hue:latest`, `mysql:8.4`, `postgres:16`, `trinodb/trino:484`, `zookeeper:3.8`, `debian:bookworm-slim` | Public upstream (Docker Hub) |
+| `jpoblete73/cassandra-kerberos:4.1.12`, `jpoblete73/ranger:2.4.0-amd64` | Docker Hub (this repo's account) |
+| `jpoblete73/oracle-free:23.9.0.0-amd64` | Docker Hub copy of Oracle's `container-registry.oracle.com/database/free:23.9.0.0-amd64` |
+
+Oracle's original registry requires a login and license acceptance, which is why the copy is hosted here.
 | Ranger | Admin (Hive policies) | overlay `overlays/warehouse/ranger` |
 | Hive | Metastore + HiveServer2 (Kerberos), LLAP | `apache/hive:nightly` |
 | Trino | 1 coordinator + 2 workers, Trino 484 | `trinodb/trino:484` |

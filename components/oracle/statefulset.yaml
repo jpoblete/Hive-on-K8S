@@ -28,7 +28,9 @@ spec:
         fsGroup: 54321
       containers:
       - name: oracle
-        image: container-registry.oracle.com/database/free:23.9.0.0-amd64
+        # Copy of container-registry.oracle.com/database/free:23.9.0.0-amd64 hosted in Docker Hub,
+        # so the stack deploys to another cluster without the Oracle registry login.
+        image: jpoblete73/oracle-free:23.9.0.0-amd64
         env:
         - name: ORACLE_PWD
           valueFrom:
